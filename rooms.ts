@@ -1,8 +1,5 @@
-// The room domain: who is allowed into which room, and how membership is
-// tracked. This module knows nothing about sockets; it only manages slots and
-// the set of subscribers a room fans its messages out to. A subscriber is any
-// sink for `ServerMsg` (the server hands each connection one that writes to its
-// socket), which keeps this layer transport-agnostic the way the wire seam is.
+// Room membership and slot tracking. No sockets here: a subscriber is just a
+// sink for ServerMsg, so this layer doesn't care what's on the other end.
 
 import type { ClientInit, ClientMsg, ServerMsg } from "./protocol.ts";
 
@@ -25,8 +22,7 @@ export class Room {
     return this.slots.length;
   }
 
-  // The lowest free slot, claimed; its index is the client's id and its box on
-  // screen. `null` when the room is full.
+  // The slot index doubles as the client's id and its box on screen. null if full.
   enter(): number | null {
     const id = this.slots.indexOf(false);
     if (id === -1) return null;
@@ -34,13 +30,11 @@ export class Room {
     return id;
   }
 
-  // Frees a slot and returns whether the room is now empty, so the caller can
-  // drop it. Wipes the leaver's box on everyone else's screen: the slot may be
-  // reused by the next joiner, who should start from a blank line rather than
-  // inherit the previous occupant's text.
+  // Returns true if the room is now empty. Clears the leaver's box so the next
+  // joiner to reuse the slot doesn't inherit stale text.
   leave(id: number): boolean {
     this.slots[id] = false;
-    this.broadcast({ type: "TaggedClear", client_id: id });
+    this.broadcast({ type: "TaggedClear", clientId: id });
     return this.slots.every((taken) => !taken);
   }
 
@@ -52,8 +46,7 @@ export class Room {
     this.subscribers.delete(sub);
   }
 
-  // Fans a message out to everyone in the room, including the sender, so all of
-  // them apply the same updates the same way.
+  // The sender is a subscriber too, so it applies its own update the same way.
   broadcast(msg: ServerMsg): void {
     for (const sub of this.subscribers) sub(msg);
   }
@@ -101,6 +94,6 @@ export function join(registry: Registry, init: ClientInit): JoinResult {
 
 export function tag(id: number, msg: ClientMsg): ServerMsg {
   return msg.type === "Codepoint"
-    ? { type: "TaggedCodepoint", client_id: id, codepoint: msg.codepoint }
-    : { type: "TaggedClear", client_id: id };
+    ? { type: "TaggedCodepoint", clientId: id, codepoint: msg.codepoint }
+    : { type: "TaggedClear", clientId: id };
 }

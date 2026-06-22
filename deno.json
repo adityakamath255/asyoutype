@@ -1,7 +1,10 @@
 {
+  "imports": {
+    "@deno/emit": "jsr:@deno/emit@^0.46.0"
+  },
   "tasks": {
-    "start": "deno run --allow-net --allow-read server.ts",
-    "check": "deno check server.ts",
+    "start": "deno run --allow-net --allow-read --allow-env server.ts",
+    "check": "deno check server.ts public/main.ts",
     "fmt": "deno fmt",
     "lint": "deno lint"
   }

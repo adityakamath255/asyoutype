@@ -1,79 +1,72 @@
 # text-stream
 
-A small web app for sharing a line of text, live, with a few other people.
-Everyone in a room gets a box. As you type, your characters stream into your box
-on everyone's screen, one codepoint at a time. Press escape to wipe your line.
+A small web app for sharing a line of text live. Everyone in a room gets a box;
+as you type, your characters stream into your box on everyone's screen, one
+codepoint at a time. Escape wipes your line.
 
-The goal of this project is the code itself: a small, clearly factored system
-that is pleasant to read. The running app is the excuse, not the point. Terminal
-versions in Python and Rust, built around the same design, live alongside it;
-this one trades the terminal for a browser so anyone can join from a URL.
+It's mostly an exercise in keeping a tiny realtime system cleanly factored.
 
 ## Running it
 
-The project runs on [Deno](https://deno.com/) with no dependencies and no build
-step. Start the server:
+Needs [Deno](https://deno.com/). The one dependency,
+[`@deno/emit`](https://jsr.io/@deno/emit), transpiles the browser client at
+startup, so there's no build step.
 
 ```sh
-deno task start          # serves on http://localhost:8000
+deno task start          # http://localhost:8000
 deno task start 4000     # or pick a port
 ```
 
-Open the URL in a browser. Choose create or join, enter a room name, and (for
-create) a capacity, then type. Room names are 4 to 10 characters; capacity is 1
-to 8. Once in a room, type to stream characters and press escape to clear your
-line. Open the same URL in another tab or on another machine to join.
+Open the URL, choose create or join, enter a room name (4-10 chars) and, for
+create, a capacity (1-8). Type to stream, escape to clear. Open the URL in
+another tab or machine to join.
 
-## How it is put together
+## Layout
 
-The app is split along the one seam that matters: the messages on the wire.
+The split follows the wire protocol.
 
-- **`protocol.ts`** defines the messages and nothing else.
-- **`rooms.ts`** owns the rooms. It never renders anything and knows nothing
-  about sockets; it tracks who is in which room and fans messages out to a
-  room's subscribers.
-- **`server.ts`** wires WebSockets to rooms and serves the page. It owns no room
-  logic of its own.
-- **`public/index.html`** is the client: it draws the boxes the server describes
-  and reports what the user types. It decides nothing about who is allowed in a
-  room.
+- **`protocol.ts`** — the messages, nothing else.
+- **`rooms.ts`** — room and slot bookkeeping. No socket code; it fans messages
+  out to a room's subscribers.
+- **`server.ts`** — wires WebSockets to rooms and serves the page. At startup it
+  bundles the client into one JS file with the wire types inlined, so the
+  browser never receives TypeScript.
+- **`public/`** — the client. `main.ts` renders and reports keystrokes,
+  `index.html` is the markup, `styles.css` the look. It imports the wire types
+  from `protocol.ts` so both ends agree on the messages.
 
 ### The wire
 
-Messages are JSON, one per WebSocket text frame. A connection has two phases:
+JSON, one message per frame. Two phases:
 
 1. **Handshake.** The client sends one `ClientInit` (create or join). The server
-   replies with one `ServerInit`: either `ValidRoom` with the client's assigned
-   id and the room capacity, or `InvalidRoom` with a reason, after which the
-   connection closes.
-2. **Streaming.** From then on the client sends `ClientMsg` values (a codepoint,
-   or a clear) and receives `ServerMsg` values. The difference between the two
-   is a `client_id`: the server stamps each message with the id of whoever sent
-   it, so every client knows which box to put a character in.
+   replies `ValidRoom` (with the assigned id and capacity) or `InvalidRoom`
+   (with a reason, then closes).
+2. **Streaming.** The client sends `ClientMsg` (a codepoint or a clear); the
+   server echoes back `ServerMsg` stamped with the sender's `clientId` so every
+   client knows which box to update.
 
 ### Rooms and identity
 
-A room is a fixed set of slots, decided at creation. Joining takes the lowest
-free slot, and that slot index _is_ your client id and your box on screen. When
-you leave, your slot frees up and can be reused by the next person who joins.
+A room is a fixed set of slots, sized at creation. Joining takes the lowest free
+slot; that index is your client id and your box. Leaving frees the slot for the
+next joiner.
 
-Membership is tied to the WebSocket: when a connection closes, for any reason,
-the slot frees and the room is removed if it just emptied. Inside a room, a sent
-message reaches every subscriber, including the sender, so everyone applies the
-same updates the same way.
+Membership tracks the WebSocket: when a connection closes for any reason the
+slot frees, and the room is dropped if it just emptied. Broadcasts go to every
+subscriber including the sender.
 
 ## Deploying it
 
-The least-effort path is [Deno Deploy](https://deno.com/deploy): point a project
-at this directory with `server.ts` as the entrypoint and push. It serves over
-HTTPS, so the client connects with `wss://` automatically, and the runtime
-assigns the port (passing no port argument lets it). The single `server.ts` also
-runs unchanged on any box with Deno installed.
+[Deno Deploy](https://deno.com/deploy): point a project at this directory with
+`server.ts` as the entrypoint. It serves over HTTPS, so the client picks
+`wss://` automatically, and the runtime assigns the port (pass no port arg). The
+same `server.ts` runs unchanged anywhere Deno is installed.
 
 ## Development
 
 ```sh
 deno task check   # type-check
-deno task lint    # lints
-deno task fmt     # formatting
+deno task lint
+deno task fmt
 ```
