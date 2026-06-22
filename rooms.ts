@@ -11,44 +11,34 @@ const MAX_CAPACITY = 8;
 export type Subscriber = (msg: ServerMsg) => void;
 
 export class Room {
-  private slots: boolean[];
-  private subscribers = new Set<Subscriber>();
+  // A slot holds its member's sink, or null when free; the index is the client id.
+  private slots: (Subscriber | null)[];
 
   constructor(capacity: number) {
-    this.slots = Array(capacity).fill(false);
+    this.slots = Array(capacity).fill(null);
   }
 
   get capacity(): number {
     return this.slots.length;
   }
 
-  // The slot index doubles as the client's id and its box on screen. null if full.
-  enter(): number | null {
-    const id = this.slots.indexOf(false);
+  enter(sub: Subscriber): number | null {
+    const id = this.slots.indexOf(null);
     if (id === -1) return null;
-    this.slots[id] = true;
+    this.slots[id] = sub;
     return id;
   }
 
   // Returns true if the room is now empty. Clears the leaver's box so the next
   // joiner to reuse the slot doesn't inherit stale text.
   leave(id: number): boolean {
-    this.slots[id] = false;
+    this.slots[id] = null;
     this.broadcast({ type: "TaggedClear", clientId: id });
-    return this.slots.every((taken) => !taken);
+    return this.slots.every((slot) => slot === null);
   }
 
-  subscribe(sub: Subscriber): void {
-    this.subscribers.add(sub);
-  }
-
-  unsubscribe(sub: Subscriber): void {
-    this.subscribers.delete(sub);
-  }
-
-  // The sender is a subscriber too, so it applies its own update the same way.
   broadcast(msg: ServerMsg): void {
-    for (const sub of this.subscribers) sub(msg);
+    for (const slot of this.slots) slot?.(msg);
   }
 }
 
@@ -71,7 +61,11 @@ function validateCapacity(capacity: number): string | null {
     : `Room capacity must be between ${MIN_CAPACITY} and ${MAX_CAPACITY} members`;
 }
 
-export function join(registry: Registry, init: ClientInit): JoinResult {
+export function join(
+  registry: Registry,
+  init: ClientInit,
+  sub: Subscriber,
+): JoinResult {
   let room: Room;
   if (init.type === "CreateRoom") {
     const invalid = validateName(init.name) ?? validateCapacity(init.capacity);
@@ -87,7 +81,7 @@ export function join(registry: Registry, init: ClientInit): JoinResult {
     room = existing;
   }
 
-  const id = room.enter();
+  const id = room.enter(sub);
   if (id === null) return { ok: false, msg: "Room is full!" };
   return { ok: true, room, id };
 }

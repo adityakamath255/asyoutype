@@ -62,7 +62,7 @@ function accept(socket: WebSocket, init: ClientInit): Membership | null {
   const send = (msg: ServerInit | ServerMsg) =>
     socket.send(JSON.stringify(msg));
 
-  const result = join(registry, init);
+  const result = join(registry, init, send);
   if (!result.ok) {
     send({ type: "InvalidRoom", msg: result.msg });
     socket.close();
@@ -70,7 +70,6 @@ function accept(socket: WebSocket, init: ClientInit): Membership | null {
   }
 
   const { room, id } = result;
-  room.subscribe(send);
   send({ type: "ValidRoom", clientId: id, capacity: room.capacity });
 
   return {
@@ -79,7 +78,6 @@ function accept(socket: WebSocket, init: ClientInit): Membership | null {
       if (tagged) room.broadcast(tagged);
     },
     release: () => {
-      room.unsubscribe(send);
       if (room.leave(id) && registry.get(init.name) === room) {
         registry.delete(init.name);
       }

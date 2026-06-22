@@ -111,6 +111,11 @@ button:hover {
   overflow: hidden;
   white-space: pre;
 }
+.room-name {
+  position: fixed;
+  top: 1.2rem;
+  font-weight: 600;
+}
 .help {
   position: fixed;
   bottom: 1.2rem;

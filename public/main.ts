@@ -29,18 +29,35 @@ const MAX_CHARS = 256;
 const form = document.getElementById("join") as HTMLFormElement;
 const errorEl = document.getElementById("error") as HTMLElement;
 const room = document.getElementById("room") as HTMLElement;
+const baseTitle = document.title;
 const capacityField = form.elements.namedItem("capacity") as HTMLInputElement;
-const mode = () => (form.elements.namedItem("mode") as RadioNodeList).value;
+const nameField = form.elements.namedItem("name") as HTMLInputElement;
+const modeField = form.elements.namedItem("mode") as RadioNodeList;
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
   errorEl.textContent = "";
-  const name = (form.elements.namedItem("name") as HTMLInputElement).value;
-  const init: ClientInit = mode() === "create"
+  const name = nameField.value;
+  const init: ClientInit = modeField.value === "create"
     ? { type: "CreateRoom", name, capacity: Number(capacityField.value) }
     : { type: "JoinRoom", name };
   connect(init);
 });
+
+function readHash(): string {
+  try {
+    return decodeURIComponent(location.hash.slice(1));
+  } catch {
+    return "";
+  }
+}
+
+const deeplinked = readHash();
+if (deeplinked) {
+  modeField.value = "join";
+  nameField.value = deeplinked;
+  form.requestSubmit();
+}
 
 function connect(init: ClientInit) {
   const scheme = location.protocol === "https:" ? "wss" : "ws";
@@ -58,7 +75,7 @@ function connect(init: ClientInit) {
     const msg: ServerInit | ServerMsg = JSON.parse(event.data);
     if (boxes === null) {
       if (msg.type === "ValidRoom") {
-        boxes = enterRoom(msg.capacity, msg.clientId);
+        boxes = enterRoom(msg.capacity, msg.clientId, init.name);
         streamInput(socket, send);
       } else if (msg.type === "InvalidRoom") {
         errorEl.textContent = msg.msg;
@@ -78,10 +95,18 @@ function connect(init: ClientInit) {
   socket.addEventListener("close", showForm);
 }
 
-function enterRoom(capacity: number, me: number): HTMLElement[] {
+function enterRoom(capacity: number, me: number, name: string): HTMLElement[] {
+  document.title = name;
+  history.replaceState(null, "", "#" + encodeURIComponent(name));
   form.hidden = true;
   room.hidden = false;
   room.replaceChildren();
+
+  const title = document.createElement("div");
+  title.className = "room-name";
+  title.textContent = name;
+  room.append(title);
+
   const boxes: HTMLElement[] = [];
   for (let i = 0; i < capacity; i++) {
     const color = `rgb(${PALETTE[i % PALETTE.length]})`;
@@ -134,6 +159,8 @@ function streamInput(socket: WebSocket, send: (msg: ClientMsg) => void) {
 }
 
 function showForm() {
+  document.title = baseTitle;
+  history.replaceState(null, "", location.pathname + location.search);
   room.hidden = true;
   room.replaceChildren();
   form.hidden = false;
