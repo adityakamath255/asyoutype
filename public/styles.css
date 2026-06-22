@@ -1,6 +1,6 @@
 :root {
   color-scheme: dark;
-  --base: #1e1e2e;
+  --base: #11111b;
   --surface: #313244;
   --overlay: #45475a;
   --text: #cdd6f4;
@@ -50,6 +50,9 @@ form {
   background: var(--surface);
   border-color: var(--text);
 }
+form:not(:has(input[value="create"]:checked)) input[name="capacity"] {
+  display: none;
+}
 input[type="text"],
 input[type="number"] {
   font: inherit;
@@ -81,33 +84,36 @@ button:hover {
 #room {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.9rem;
   align-items: center;
-}
-.slot {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-.tag {
-  width: 6.5rem;
-  text-align: right;
-  font-size: 0.85rem;
 }
 .box {
-  width: 40ch;
-  height: 2.1rem;
+  position: relative;
+  width: 48ch;
+  height: 2.6rem;
+  border: 1px solid;
+}
+.tag {
+  position: absolute;
+  top: 0;
+  left: 0.7rem;
+  transform: translateY(-50%);
+  padding: 0 0.35rem;
+  background: var(--base);
+  font-size: 0.85rem;
+}
+.line {
+  height: 100%;
   padding: 0 0.7rem;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   overflow: hidden;
-  white-space: nowrap;
-  border: 1px solid;
-  border-radius: 10px;
+  white-space: pre;
 }
 .help {
-  margin-top: 1rem;
+  position: fixed;
+  bottom: 1.2rem;
   color: var(--subtext);
   font-size: 0.85rem;
 }

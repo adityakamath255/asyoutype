@@ -32,12 +32,6 @@ const room = document.getElementById("room") as HTMLElement;
 const capacityField = form.elements.namedItem("capacity") as HTMLInputElement;
 const mode = () => (form.elements.namedItem("mode") as RadioNodeList).value;
 
-const updateMode = () => {
-  capacityField.hidden = mode() !== "create";
-};
-form.addEventListener("change", updateMode);
-updateMode();
-
 form.addEventListener("submit", (event) => {
   event.preventDefault();
   errorEl.textContent = "";
@@ -91,22 +85,21 @@ function enterRoom(capacity: number, me: number): HTMLElement[] {
   const boxes: HTMLElement[] = [];
   for (let i = 0; i < capacity; i++) {
     const color = `rgb(${PALETTE[i % PALETTE.length]})`;
-    const slot = document.createElement("div");
-    slot.className = "slot";
-
-    const tag = document.createElement("span");
-    tag.className = "tag";
-    tag.textContent = i === me ? `${i + 1} ← you` : `${i + 1}`;
-    tag.style.color = color;
-
     const box = document.createElement("div");
     box.className = "box";
     box.style.borderColor = color;
     box.style.color = color;
 
-    slot.append(tag, box);
-    room.append(slot);
-    boxes.push(box);
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = i === me ? `${i + 1} ← you` : `${i + 1}`;
+
+    const line = document.createElement("div");
+    line.className = "line";
+
+    box.append(tag, line);
+    room.append(box);
+    boxes.push(line);
   }
   const help = document.createElement("div");
   help.className = "help";
