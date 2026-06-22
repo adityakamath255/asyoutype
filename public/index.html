@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>text-stream</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --base: #1e1e2e;
+        --surface: #313244;
+        --overlay: #45475a;
+        --text: #cdd6f4;
+        --subtext: #6c7086;
+        --red: #f38ba8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--base);
+        color: var(--text);
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+      h1 {
+        margin: 0 0 1rem;
+        font-size: 1.25rem;
+        font-weight: 600;
+      }
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        width: 20rem;
+      }
+      .modes {
+        display: flex;
+        gap: 0.5rem;
+      }
+      .modes label {
+        flex: 1;
+        text-align: center;
+        padding: 0.45rem;
+        border: 1px solid var(--overlay);
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .modes input {
+        display: none;
+      }
+      .modes label:has(input:checked) {
+        background: var(--surface);
+        border-color: var(--text);
+      }
+      input[type="text"],
+      input[type="number"] {
+        font: inherit;
+        width: 100%;
+        padding: 0.5rem 0.65rem;
+        color: inherit;
+        background: var(--surface);
+        border: 1px solid var(--overlay);
+        border-radius: 8px;
+      }
+      button {
+        font: inherit;
+        padding: 0.55rem;
+        color: var(--base);
+        background: var(--text);
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button:hover {
+        background: #b4befe;
+      }
+      .error {
+        min-height: 1.2em;
+        color: var(--red);
+        font-size: 0.85rem;
+      }
+      #room {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        align-items: center;
+      }
+      .slot {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+      }
+      .tag {
+        width: 6.5rem;
+        text-align: right;
+        font-size: 0.85rem;
+      }
+      .box {
+        width: 40ch;
+        height: 2.1rem;
+        padding: 0 0.7rem;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        overflow: hidden;
+        white-space: nowrap;
+        border: 1px solid;
+        border-radius: 10px;
+      }
+      .help {
+        margin-top: 1rem;
+        color: var(--subtext);
+        font-size: 0.85rem;
+      }
+      [hidden] {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <form id="join">
+        <h1>text-stream</h1>
+        <div class="modes">
+          <label><input type="radio" name="mode" value="create" checked />
+            create</label>
+          <label><input type="radio" name="mode" value="join" /> join</label>
+        </div>
+        <input
+          type="text"
+          name="name"
+          placeholder="room name (4-10 chars)"
+          required
+        />
+        <input type="number" name="capacity" value="4" min="1" max="8" />
+        <button type="submit">enter</button>
+        <div class="error" id="error"></div>
+      </form>
+
+      <section id="room" hidden></section>
+    </main>
+
+    <script type="module">
+      const PALETTE = [
+        "243,139,168",
+        "203,166,247",
+        "250,179,135",
+        "137,180,250",
+        "249,226,175",
+        "148,226,213",
+        "166,227,161",
+        "245,194,231",
+      ];
+      // The terminal client shows a sliding window of the most recent columns;
+      // here a fixed-width box clips overflow and the cap just bounds memory.
+      const MAX_CHARS = 256;
+
+      const form = document.getElementById("join");
+      const errorEl = document.getElementById("error");
+      const room = document.getElementById("room");
+      const capacityField = form.elements.capacity;
+
+      const updateMode = () => {
+        capacityField.hidden = form.elements.mode.value !== "create";
+      };
+      form.addEventListener("change", updateMode);
+      updateMode();
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        errorEl.textContent = "";
+        const mode = form.elements.mode.value;
+        const name = form.elements.name.value;
+        const init = mode === "create"
+          ? {
+            type: "CreateRoom",
+            name,
+            capacity: Number(form.elements.capacity.value),
+          }
+          : { type: "JoinRoom", name };
+        connect(init);
+      });
+
+      function connect(init) {
+        const scheme = location.protocol === "https:" ? "wss" : "ws";
+        const socket = new WebSocket(`${scheme}://${location.host}/ws`);
+        const send = (msg) => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify(msg));
+          }
+        };
+        let boxes = null;
+
+        socket.addEventListener("open", () => send(init));
+
+        socket.addEventListener("message", (event) => {
+          const msg = JSON.parse(event.data);
+          if (boxes === null) {
+            if (msg.type === "InvalidRoom") {
+              errorEl.textContent = msg.msg;
+              socket.close();
+              return;
+            }
+            boxes = enterRoom(msg.capacity, msg.client_id);
+            streamInput(socket, send);
+            return;
+          }
+          const box = boxes[msg.client_id];
+          box.textContent = msg.type === "TaggedCodepoint"
+            ? [...(box.textContent + msg.codepoint)].slice(-MAX_CHARS).join("")
+            : "";
+        });
+
+        socket.addEventListener("close", showForm);
+      }
+
+      function enterRoom(capacity, me) {
+        form.hidden = true;
+        room.hidden = false;
+        room.replaceChildren();
+        const boxes = [];
+        for (let i = 0; i < capacity; i++) {
+          const color = `rgb(${PALETTE[i % PALETTE.length]})`;
+          const slot = document.createElement("div");
+          slot.className = "slot";
+
+          const tag = document.createElement("span");
+          tag.className = "tag";
+          tag.textContent = i === me ? `${i + 1} ← you` : `${i + 1}`;
+          tag.style.color = color;
+
+          const box = document.createElement("div");
+          box.className = "box";
+          box.style.borderColor = color;
+          box.style.color = color;
+
+          slot.append(tag, box);
+          room.append(slot);
+          boxes.push(box);
+        }
+        const help = document.createElement("div");
+        help.className = "help";
+        help.textContent = "type to stream  •  esc: clear line";
+        room.append(help);
+        return boxes;
+      }
+
+      function streamInput(socket, send) {
+        const onKey = (event) => {
+          if (event.ctrlKey || event.altKey || event.metaKey) return;
+          if (event.key === "Escape") {
+            send({ type: "Clear" });
+            event.preventDefault();
+          } else if ([...event.key].length === 1) {
+            send({ type: "Codepoint", codepoint: event.key });
+            event.preventDefault();
+          }
+        };
+        const onPaste = (event) => {
+          for (const codepoint of event.clipboardData.getData("text")) {
+            if (codepoint >= " ") send({ type: "Codepoint", codepoint });
+          }
+          event.preventDefault();
+        };
+        addEventListener("keydown", onKey);
+        addEventListener("paste", onPaste);
+        socket.addEventListener("close", () => {
+          removeEventListener("keydown", onKey);
+          removeEventListener("paste", onPaste);
+        });
+      }
+
+      function showForm() {
+        room.hidden = true;
+        room.replaceChildren();
+        form.hidden = false;
+      }
+    </script>
+  </body>
+</html>
