@@ -1,4 +1,4 @@
-# text-stream
+# asyoutype
 
 A small web app for sharing a line of text live. Everyone in a room gets a box;
 as you type, your characters stream into your box on everyone's screen, one

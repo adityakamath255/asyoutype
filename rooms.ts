@@ -92,8 +92,12 @@ export function join(registry: Registry, init: ClientInit): JoinResult {
   return { ok: true, room, id };
 }
 
-export function tag(id: number, msg: ClientMsg): ServerMsg {
-  return msg.type === "Codepoint"
-    ? { type: "TaggedCodepoint", clientId: id, codepoint: msg.codepoint }
-    : { type: "TaggedClear", clientId: id };
+export function tag(id: number, msg: ClientMsg): ServerMsg | null {
+  if (msg.type === "Codepoint") {
+    return typeof msg.codepoint === "string" && [...msg.codepoint].length === 1
+      ? { type: "TaggedCodepoint", clientId: id, codepoint: msg.codepoint }
+      : null;
+  }
+  if (msg.type === "Clear") return { type: "TaggedClear", clientId: id };
+  return null;
 }

@@ -9,6 +9,23 @@ import { join, type Registry, tag } from "./rooms.ts";
 
 const registry: Registry = new Map();
 
+const MAX_FRAME = 1024;
+const RATE_LIMIT = 256;
+const RATE_WINDOW_MS = 1000;
+
+function rateLimiter(limit: number, windowMs: number): () => boolean {
+  let windowStart = 0;
+  let count = 0;
+  return () => {
+    const now = Date.now();
+    if (now - windowStart >= windowMs) {
+      windowStart = now;
+      count = 0;
+    }
+    return count++ < limit;
+  };
+}
+
 type Asset = { body: string; type: string };
 
 const file = (path: string) =>
@@ -57,7 +74,10 @@ function accept(socket: WebSocket, init: ClientInit): Membership | null {
   send({ type: "ValidRoom", clientId: id, capacity: room.capacity });
 
   return {
-    feed: (msg) => room.broadcast(tag(id, msg)),
+    feed: (msg) => {
+      const tagged = tag(id, msg);
+      if (tagged) room.broadcast(tagged);
+    },
     release: () => {
       room.unsubscribe(send);
       if (room.leave(id) && registry.get(init.name) === room) {
@@ -69,8 +89,14 @@ function accept(socket: WebSocket, init: ClientInit): Membership | null {
 
 function handleSocket(socket: WebSocket) {
   let member: Membership | null = null;
+  const allow = rateLimiter(RATE_LIMIT, RATE_WINDOW_MS);
 
   socket.onmessage = (event) => {
+    if (typeof event.data !== "string" || event.data.length > MAX_FRAME) {
+      socket.close();
+      return;
+    }
+    if (!allow()) return;
     const msg = parse(event.data);
     if (!msg) return;
     if (member) member.feed(msg as ClientMsg);
