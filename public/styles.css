@@ -81,7 +81,7 @@ button:hover {
   color: var(--red);
   font-size: 0.85rem;
 }
-#room {
+.room-body {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;

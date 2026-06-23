@@ -2,11 +2,9 @@
 
 A small web app for sharing a line of text live. Everyone in a room gets a box;
 as you type, your characters stream into your box on everyone's screen, one
-codepoint at a time. Escape wipes your line.
+codepoint at a time. Escape clears your line.
 
-It's mostly an exercise in keeping a tiny realtime system cleanly factored.
-
-## Running it
+## Running
 
 Needs [Deno](https://deno.com/). The one dependency,
 [`@deno/emit`](https://jsr.io/@deno/emit), transpiles the browser client at
@@ -25,13 +23,13 @@ another tab or machine to join.
 
 The split follows the wire protocol.
 
-- **`protocol.ts`** — the messages, nothing else.
-- **`rooms.ts`** — room and slot bookkeeping. No socket code; it fans messages
-  out to a room's subscribers.
-- **`server.ts`** — wires WebSockets to rooms and serves the page. At startup it
-  bundles the client into one JS file with the wire types inlined, so the
-  browser never receives TypeScript.
-- **`public/`** — the client. `main.ts` renders and reports keystrokes,
+- **`protocol.ts`**: the messages.
+- **`server.ts`**: the rooms and the socket wiring. A `Room` is slot bookkeeping
+  that fans messages out to its subscribers; the surrounding code wires
+  WebSockets to rooms and serves the page. At startup it bundles the client into
+  one JS file with the wire types inlined, so the browser never receives
+  TypeScript.
+- **`public/`**: the client. `main.ts` renders and reports keystrokes,
   `index.html` is the markup, `styles.css` the look. It imports the wire types
   from `protocol.ts` so both ends agree on the messages.
 

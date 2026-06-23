@@ -1,17 +1,125 @@
 import { bundle } from "@deno/emit";
-import type {
-  ClientInit,
-  ClientMsg,
-  ServerInit,
-  ServerMsg,
+import {
+  type ClientInit,
+  type ClientMsg,
+  decodeClientInit,
+  decodeClientMsg,
+  type ServerInit,
+  type ServerMsg,
 } from "./protocol.ts";
-import { join, type Registry, tag } from "./rooms.ts";
 
-const registry: Registry = new Map();
+const MIN_NAME_LEN = 4;
+const MAX_NAME_LEN = 10;
+const MIN_CAPACITY = 1;
+const MAX_CAPACITY = 8;
 
 const MAX_FRAME = 1024;
 const RATE_LIMIT = 256;
 const RATE_WINDOW_MS = 1000;
+
+type Subscriber = (msg: ServerMsg) => void;
+
+function tag(id: number, msg: ClientMsg): ServerMsg {
+  return msg.type === "Codepoint"
+    ? { type: "TaggedCodepoint", clientId: id, codepoint: msg.codepoint }
+    : { type: "TaggedClear", clientId: id };
+}
+
+class Room {
+  private slots: (Subscriber | null)[];
+
+  constructor(capacity: number) {
+    this.slots = Array(capacity).fill(null);
+  }
+
+  get capacity(): number {
+    return this.slots.length;
+  }
+
+  get isEmpty(): boolean {
+    return this.slots.every((slot) => slot === null);
+  }
+
+  enter(sub: Subscriber): number | null {
+    const id = this.slots.indexOf(null);
+    if (id === -1) return null;
+    this.slots[id] = sub;
+    return id;
+  }
+
+  leave(id: number): void {
+    this.slots[id] = null;
+    this.broadcast({ type: "TaggedClear", clientId: id });
+  }
+
+  broadcast(msg: ServerMsg): void {
+    for (const slot of this.slots) slot?.(msg);
+  }
+}
+
+type Registry = Map<string, Room>;
+
+class Membership {
+  constructor(
+    private readonly registry: Registry,
+    private readonly name: string,
+    readonly room: Room,
+    readonly clientId: number,
+  ) {}
+
+  feed(msg: ClientMsg): void {
+    this.room.broadcast(tag(this.clientId, msg));
+  }
+
+  leave(): void {
+    this.room.leave(this.clientId);
+    if (this.room.isEmpty) this.registry.delete(this.name);
+  }
+}
+
+type JoinResult =
+  | { ok: true; membership: Membership }
+  | { ok: false; msg: string };
+
+function validateName(name: string): string | null {
+  const length = [...name].length;
+  return length >= MIN_NAME_LEN && length <= MAX_NAME_LEN
+    ? null
+    : `Room name must be between ${MIN_NAME_LEN} and ${MAX_NAME_LEN} chars`;
+}
+
+function validateCapacity(capacity: number): string | null {
+  return capacity >= MIN_CAPACITY && capacity <= MAX_CAPACITY
+    ? null
+    : `Room capacity must be between ${MIN_CAPACITY} and ${MAX_CAPACITY} members`;
+}
+
+function join(
+  registry: Registry,
+  init: ClientInit,
+  sub: Subscriber,
+): JoinResult {
+  let room: Room;
+  if (init.type === "CreateRoom") {
+    const invalid = validateName(init.name) ?? validateCapacity(init.capacity);
+    if (invalid) return { ok: false, msg: invalid };
+    if (registry.has(init.name)) {
+      return { ok: false, msg: "Room name has been taken!" };
+    }
+    room = new Room(init.capacity);
+    registry.set(init.name, room);
+  } else {
+    const existing = registry.get(init.name);
+    if (!existing) return { ok: false, msg: "Room does not exist!" };
+    room = existing;
+  }
+
+  const id = room.enter(sub);
+  if (id === null) return { ok: false, msg: "Room is full!" };
+  return { ok: true, membership: new Membership(registry, init.name, room, id) };
+}
+
+const registry: Registry = new Map();
 
 function rateLimiter(limit: number, windowMs: number): () => boolean {
   let windowStart = 0;
@@ -40,23 +148,11 @@ const assets: Record<string, Asset> = {
     body: await file("./public/styles.css"),
     type: "text/css; charset=utf-8",
   },
-  // bundled, not just served: this inlines the shared wire types so the
-  // browser gets plain JS and never sees the .ts imports.
   "/main.js": {
     body: (await bundle(new URL("./public/main.ts", import.meta.url))).code,
     type: "text/javascript; charset=utf-8",
   },
 };
-
-function parse(data: string): ClientInit | ClientMsg | null {
-  try {
-    return JSON.parse(data);
-  } catch {
-    return null;
-  }
-}
-
-type Membership = { feed: (msg: ClientMsg) => void; release: () => void };
 
 function accept(socket: WebSocket, init: ClientInit): Membership | null {
   const send = (msg: ServerInit | ServerMsg) =>
@@ -69,20 +165,13 @@ function accept(socket: WebSocket, init: ClientInit): Membership | null {
     return null;
   }
 
-  const { room, id } = result;
-  send({ type: "ValidRoom", clientId: id, capacity: room.capacity });
-
-  return {
-    feed: (msg) => {
-      const tagged = tag(id, msg);
-      if (tagged) room.broadcast(tagged);
-    },
-    release: () => {
-      if (room.leave(id) && registry.get(init.name) === room) {
-        registry.delete(init.name);
-      }
-    },
-  };
+  const { membership } = result;
+  send({
+    type: "ValidRoom",
+    clientId: membership.clientId,
+    capacity: membership.room.capacity,
+  });
+  return membership;
 }
 
 function handleSocket(socket: WebSocket) {
@@ -95,17 +184,18 @@ function handleSocket(socket: WebSocket) {
       return;
     }
     if (!allow()) return;
-    const msg = parse(event.data);
-    if (!msg) return;
-    if (member) member.feed(msg as ClientMsg);
-    else member = accept(socket, msg as ClientInit);
+    if (member) {
+      const msg = decodeClientMsg(event.data);
+      if (msg) member.feed(msg);
+    } else {
+      const init = decodeClientInit(event.data);
+      if (init) member = accept(socket, init);
+    }
   };
 
-  socket.onclose = () => member?.release();
+  socket.onclose = () => member?.leave();
 }
 
-// No port arg lets the runtime decide (8000 locally, or whatever Deno Deploy
-// hands us).
 const options = Deno.args[0] ? { port: Number(Deno.args[0]) } : {};
 
 Deno.serve(options, (req) => {
