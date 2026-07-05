@@ -26,7 +26,7 @@ const PALETTE = [
 // the box clips overflow visually; this just caps what it holds in memory
 const MAX_CHARS = 256;
 
-const HELP = "type to stream  •  esc: clear line";
+const HELP = "type to stream";
 
 type Props = Partial<Omit<HTMLElement, "style">> & {
   style?: Partial<CSSStyleDeclaration>;
@@ -130,19 +130,44 @@ class Session {
 class RoomView {
   readonly el: HTMLElement;
   private boxes: Box[];
+  private input: HTMLInputElement;
 
-  constructor(session: Session, readonly name: string) {
+  constructor(private session: Session, readonly name: string) {
     this.boxes = Array.from(
       { length: session.capacity },
       (_, i) => new Box(i, i === session.clientId),
     );
+
+    this.input = el("input", { className: "capture" }) as HTMLInputElement;
+    this.input.type = "text";
+    this.input.autocomplete = "off";
+    this.input.autocapitalize = "off";
+    this.input.spellcheck = false;
+    this.input.setAttribute("autocorrect", "off");
+    this.input.placeholder = "type…";
+
+    const clearButton = el("button", {
+      className: "clear",
+      textContent: "clear",
+      onclick: () => session.clear(),
+    });
+
     this.el = el(
       "div",
       { className: "room-body" },
       el("div", { className: "room-name", textContent: name }),
       ...this.boxes.map((box) => box.el),
-      el("div", { className: "help", textContent: HELP }),
+      el("div", { className: "help", textContent: HELP }, clearButton),
+      this.input,
     );
+    this.el.addEventListener("click", () => this.focus(), {
+      signal: session.signal,
+    });
+    this.wireCapture();
+  }
+
+  focus(): void {
+    this.input.focus();
   }
 
   apply(msg: ServerMsg): void {
@@ -150,33 +175,98 @@ class RoomView {
     if (msg.type === "TaggedCodepoint") box.push(msg.codepoint);
     else box.clear();
   }
+
+  private wireCapture(): void {
+    const { input, session } = this;
+    const flush = () => {
+      if (input.value) session.send(input.value);
+      input.value = "";
+    };
+    const signal = session.signal;
+    input.addEventListener(
+      "input",
+      (event) => {
+        if (!(event as InputEvent).isComposing) flush();
+      },
+      { signal },
+    );
+    input.addEventListener("compositionend", flush, { signal });
+    input.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          input.value = "";
+          session.clear();
+        }
+      },
+      { signal },
+    );
+  }
 }
-
-const form = document.getElementById("join") as HTMLFormElement;
-const errorEl = document.getElementById("error") as HTMLElement;
-const room = document.getElementById("room") as HTMLElement;
-const baseTitle = document.title;
-
-const nameField = form.elements.namedItem("name") as HTMLInputElement;
-const capacityField = form.elements.namedItem("capacity") as HTMLInputElement;
-const modeField = form.elements.namedItem("mode") as RadioNodeList;
 
 type Connection =
   | { ok: true; session: Session }
   | { ok: false; error: string };
 
-async function enter(init: ClientInit) {
-  const result = await connect(init);
-  if (!result.ok) {
-    errorEl.textContent = result.error;
-    return;
+class App {
+  private readonly form = document.getElementById("join") as HTMLFormElement;
+  private readonly errorEl = document.getElementById("error") as HTMLElement;
+  private readonly room = document.getElementById("room") as HTMLElement;
+  private readonly baseTitle = document.title;
+
+  private readonly nameField = this.field("name") as HTMLInputElement;
+  private readonly capacityField = this.field("capacity") as HTMLInputElement;
+  private readonly modeField = this.field("mode") as RadioNodeList;
+
+  private field(name: string) {
+    return this.form.elements.namedItem(name);
   }
-  const { session } = result;
-  const view = new RoomView(session, init.name);
-  showRoom(view);
-  session.onMessage((msg) => view.apply(msg));
-  session.onClose(() => showRoom(null));
-  streamInput(session);
+
+  start(): void {
+    this.form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      this.errorEl.textContent = "";
+      this.enter(this.readForm());
+    });
+
+    const deeplinked = readHash();
+    if (deeplinked) {
+      this.modeField.value = "join";
+      this.nameField.value = deeplinked;
+      this.form.requestSubmit();
+    }
+  }
+
+  private readForm(): ClientInit {
+    const name = this.nameField.value;
+    return this.modeField.value === "create"
+      ? { type: "CreateRoom", name, capacity: Number(this.capacityField.value) }
+      : { type: "JoinRoom", name };
+  }
+
+  private async enter(init: ClientInit): Promise<void> {
+    const result = await connect(init);
+    if (!result.ok) {
+      this.errorEl.textContent = result.error;
+      return;
+    }
+    const { session } = result;
+    const view = new RoomView(session, init.name);
+    this.show(view);
+    session.onMessage((msg) => view.apply(msg));
+    session.onClose(() => this.show(null));
+    view.focus();
+  }
+
+  private show(view: RoomView | null): void {
+    const hash = view ? "#" + encodeURIComponent(view.name) : "";
+    document.title = view ? view.name : this.baseTitle;
+    history.replaceState(null, "", location.pathname + location.search + hash);
+    this.room.replaceChildren(...(view ? [view.el] : []));
+    this.form.hidden = view !== null;
+    this.room.hidden = view === null;
+  }
 }
 
 async function connect(init: ClientInit): Promise<Connection> {
@@ -211,31 +301,6 @@ function handshake(socket: WebSocket): Promise<ServerInit | null> {
   });
 }
 
-function showRoom(view: RoomView | null) {
-  const hash = view ? "#" + encodeURIComponent(view.name) : "";
-  document.title = view ? view.name : baseTitle;
-  history.replaceState(null, "", location.pathname + location.search + hash);
-  room.replaceChildren(...(view ? [view.el] : []));
-  form.hidden = view !== null;
-  room.hidden = view === null;
-}
-
-function streamInput(session: Session) {
-  const onKey = (event: KeyboardEvent) => {
-    if (event.ctrlKey || event.altKey || event.metaKey) return;
-    if (event.key === "Escape") session.clear();
-    else if (isCodepoint(event.key)) session.send(event.key);
-    else return;
-    event.preventDefault();
-  };
-  const onPaste = (event: ClipboardEvent) => {
-    session.send(event.clipboardData?.getData("text") ?? "");
-    event.preventDefault();
-  };
-  addEventListener("keydown", onKey, { signal: session.signal });
-  addEventListener("paste", onPaste, { signal: session.signal });
-}
-
 function readHash(): string {
   try {
     return decodeURIComponent(location.hash.slice(1));
@@ -244,26 +309,4 @@ function readHash(): string {
   }
 }
 
-function readForm(): ClientInit {
-  const name = nameField.value;
-  return modeField.value === "create"
-    ? { type: "CreateRoom", name, capacity: Number(capacityField.value) }
-    : { type: "JoinRoom", name };
-}
-
-function main() {
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    errorEl.textContent = "";
-    enter(readForm());
-  });
-
-  const deeplinked = readHash();
-  if (deeplinked) {
-    modeField.value = "join";
-    nameField.value = deeplinked;
-    form.requestSubmit();
-  }
-}
-
-main();
+new App().start();

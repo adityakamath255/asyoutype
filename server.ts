@@ -28,16 +28,12 @@ function tag(id: number, msg: ClientMsg): ServerMsg {
 class Room {
   private slots: (Subscriber | null)[];
 
-  constructor(capacity: number) {
+  constructor(capacity: number, private readonly onEmpty: () => void) {
     this.slots = Array(capacity).fill(null);
   }
 
   get capacity(): number {
     return this.slots.length;
-  }
-
-  get isEmpty(): boolean {
-    return this.slots.every((slot) => slot === null);
   }
 
   enter(sub: Subscriber): number | null {
@@ -50,30 +46,11 @@ class Room {
   leave(id: number): void {
     this.slots[id] = null;
     this.broadcast({ type: "TaggedClear", clientId: id });
+    if (this.slots.every((slot) => slot === null)) this.onEmpty();
   }
 
   broadcast(msg: ServerMsg): void {
     for (const slot of this.slots) slot?.(msg);
-  }
-}
-
-type Registry = Map<string, Room>;
-
-class Membership {
-  constructor(
-    private readonly registry: Registry,
-    private readonly name: string,
-    readonly room: Room,
-    readonly clientId: number,
-  ) {}
-
-  feed(msg: ClientMsg): void {
-    this.room.broadcast(tag(this.clientId, msg));
-  }
-
-  leave(): void {
-    this.room.leave(this.clientId);
-    if (this.room.isEmpty) this.registry.delete(this.name);
   }
 }
 
@@ -94,32 +71,50 @@ function validateCapacity(capacity: number): string | null {
     : `Room capacity must be between ${MIN_CAPACITY} and ${MAX_CAPACITY} members`;
 }
 
-function join(
-  registry: Registry,
-  init: ClientInit,
-  sub: Subscriber,
-): JoinResult {
-  let room: Room;
-  if (init.type === "CreateRoom") {
-    const invalid = validateName(init.name) ?? validateCapacity(init.capacity);
-    if (invalid) return { ok: false, msg: invalid };
-    if (registry.has(init.name)) {
-      return { ok: false, msg: "Room name has been taken!" };
-    }
-    room = new Room(init.capacity);
-    registry.set(init.name, room);
-  } else {
-    const existing = registry.get(init.name);
-    if (!existing) return { ok: false, msg: "Room does not exist!" };
-    room = existing;
-  }
+class Lobby {
+  private readonly rooms = new Map<string, Room>();
 
-  const id = room.enter(sub);
-  if (id === null) return { ok: false, msg: "Room is full!" };
-  return { ok: true, membership: new Membership(registry, init.name, room, id) };
+  join(init: ClientInit, sub: Subscriber): JoinResult {
+    let room: Room;
+    if (init.type === "CreateRoom") {
+      const invalid = validateName(init.name) ??
+        validateCapacity(init.capacity);
+      if (invalid) return { ok: false, msg: invalid };
+      if (this.rooms.has(init.name)) {
+        return { ok: false, msg: "Room name has been taken!" };
+      }
+      room = new Room(init.capacity, () => this.rooms.delete(init.name));
+      this.rooms.set(init.name, room);
+    } else {
+      const existing = this.rooms.get(init.name);
+      if (!existing) return { ok: false, msg: "Room does not exist!" };
+      room = existing;
+    }
+
+    const id = room.enter(sub);
+    if (id === null) return { ok: false, msg: "Room is full!" };
+    return { ok: true, membership: new Membership(room, id) };
+  }
 }
 
-const registry: Registry = new Map();
+class Membership {
+  constructor(
+    private readonly room: Room,
+    readonly clientId: number,
+  ) {}
+
+  get capacity(): number {
+    return this.room.capacity;
+  }
+
+  feed(msg: ClientMsg): void {
+    this.room.broadcast(tag(this.clientId, msg));
+  }
+
+  leave(): void {
+    this.room.leave(this.clientId);
+  }
+}
 
 function rateLimiter(limit: number, windowMs: number): () => boolean {
   let windowStart = 0;
@@ -154,11 +149,15 @@ const assets: Record<string, Asset> = {
   },
 };
 
-function accept(socket: WebSocket, init: ClientInit): Membership | null {
+function accept(
+  lobby: Lobby,
+  socket: WebSocket,
+  init: ClientInit,
+): Membership | null {
   const send = (msg: ServerInit | ServerMsg) =>
     socket.send(JSON.stringify(msg));
 
-  const result = join(registry, init, send);
+  const result = lobby.join(init, send);
   if (!result.ok) {
     send({ type: "InvalidRoom", msg: result.msg });
     socket.close();
@@ -169,12 +168,12 @@ function accept(socket: WebSocket, init: ClientInit): Membership | null {
   send({
     type: "ValidRoom",
     clientId: membership.clientId,
-    capacity: membership.room.capacity,
+    capacity: membership.capacity,
   });
   return membership;
 }
 
-function handleSocket(socket: WebSocket) {
+function handleSocket(lobby: Lobby, socket: WebSocket) {
   let member: Membership | null = null;
   const allow = rateLimiter(RATE_LIMIT, RATE_WINDOW_MS);
 
@@ -189,7 +188,7 @@ function handleSocket(socket: WebSocket) {
       if (msg) member.feed(msg);
     } else {
       const init = decodeClientInit(event.data);
-      if (init) member = accept(socket, init);
+      if (init) member = accept(lobby, socket, init);
     }
   };
 
@@ -197,6 +196,7 @@ function handleSocket(socket: WebSocket) {
 }
 
 const options = Deno.args[0] ? { port: Number(Deno.args[0]) } : {};
+const lobby = new Lobby();
 
 Deno.serve(options, (req) => {
   const { pathname } = new URL(req.url);
@@ -206,7 +206,7 @@ Deno.serve(options, (req) => {
       return new Response("expected a websocket upgrade", { status: 400 });
     }
     const { socket, response } = Deno.upgradeWebSocket(req);
-    handleSocket(socket);
+    handleSocket(lobby, socket);
     return response;
   }
 

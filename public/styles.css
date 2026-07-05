@@ -54,7 +54,8 @@ form:not(:has(input[value="create"]:checked)) input[name="capacity"] {
   display: none;
 }
 input[type="text"],
-input[type="number"] {
+input[type="number"],
+.capture {
   font: inherit;
   width: 100%;
   padding: 0.5rem 0.65rem;
@@ -119,9 +120,41 @@ button:hover {
 .help {
   position: fixed;
   bottom: 1.2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   color: var(--subtext);
   font-size: 0.85rem;
 }
+
+.capture {
+  width: 48ch;
+  max-width: calc(100vw - 2rem);
+  text-align: center;
+}
+.capture::placeholder {
+  color: var(--subtext);
+}
+.capture:focus {
+  outline: none;
+  border-color: var(--text);
+}
+
+.help .clear {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--subtext);
+  background: transparent;
+  border: 1px solid var(--overlay);
+  border-radius: 999px;
+}
+.help .clear:hover {
+  color: var(--text);
+  border-color: var(--text);
+  background: var(--surface);
+}
+
 [hidden] {
   display: none !important;
 }
