@@ -8,10 +8,12 @@ export type ServerInit =
 
 export type ClientMsg =
   | { type: "Codepoint"; codepoint: string }
+  | { type: "Backspace" }
   | { type: "Clear" };
 
 export type ServerMsg =
   | { type: "TaggedCodepoint"; clientId: number; codepoint: string }
+  | { type: "TaggedBackspace"; clientId: number }
   | { type: "TaggedClear"; clientId: number };
 
 type Field = (x: unknown) => boolean;
@@ -54,6 +56,7 @@ export const decodeClientInit = decoder<ClientInit>({
 
 export const decodeClientMsg = decoder<ClientMsg>({
   Codepoint: { codepoint: char },
+  Backspace: {},
   Clear: {},
 });
 
@@ -64,5 +67,6 @@ export const decodeServerInit = decoder<ServerInit>({
 
 export const decodeServerMsg = decoder<ServerMsg>({
   TaggedCodepoint: { clientId: int, codepoint: char },
+  TaggedBackspace: { clientId: int },
   TaggedClear: { clientId: int },
 });

@@ -2,7 +2,7 @@
 
 A small web app for sharing a line of text live. Everyone in a room gets a box;
 as you type, your characters stream into your box on everyone's screen, one
-codepoint at a time. Escape clears your line.
+codepoint at a time. Backspace retracts the last one; escape clears your line.
 
 ## Running
 
@@ -16,8 +16,8 @@ deno task start 4000     # or pick a port
 ```
 
 Open the URL, choose create or join, enter a room name (4-10 chars) and, for
-create, a capacity (1-8). Type to stream, escape to clear. Open the URL in
-another tab or machine to join.
+create, a capacity (1-8). Type to stream, backspace to retract, escape to clear.
+Open the URL in another tab or machine to join.
 
 ## Layout
 
@@ -40,9 +40,9 @@ JSON, one message per frame. Two phases:
 1. **Handshake.** The client sends one `ClientInit` (create or join). The server
    replies `ValidRoom` (with the assigned id and capacity) or `InvalidRoom`
    (with a reason, then closes).
-2. **Streaming.** The client sends `ClientMsg` (a codepoint or a clear); the
-   server echoes back `ServerMsg` stamped with the sender's `clientId` so every
-   client knows which box to update.
+2. **Streaming.** The client sends `ClientMsg` (a codepoint, a backspace, or a
+   clear); the server echoes back `ServerMsg` stamped with the sender's
+   `clientId` so every client knows which box to update.
 
 ### Rooms and identity
 

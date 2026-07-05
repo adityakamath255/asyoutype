@@ -30,6 +30,10 @@ const HELP = matchMedia("(pointer: coarse)").matches
   ? "tap to type"
   : "type to stream";
 
+// virtual keyboards only report backspace by deleting something, so the
+// capture input always holds one zero-width char for them to delete.
+const SENTINEL = "​";
+
 type Tag = keyof HTMLElementTagNameMap;
 
 type Props<K extends Tag> = Partial<Omit<HTMLElementTagNameMap[K], "style">> & {
@@ -76,13 +80,19 @@ class Box {
     this.render();
   }
 
+  pop(): void {
+    this.codepoints.pop();
+    this.render();
+  }
+
   clear(): void {
     this.codepoints.length = 0;
     this.render();
   }
 }
 
-const isCodepoint = (s: string): boolean => [...s].length === 1 && s >= " ";
+const isCodepoint = (s: string): boolean =>
+  [...s].length === 1 && s >= " " && s !== SENTINEL;
 
 class Session {
   private ended = new AbortController();
@@ -109,6 +119,10 @@ class Session {
     for (const codepoint of text) {
       if (isCodepoint(codepoint)) this.write({ type: "Codepoint", codepoint });
     }
+  }
+
+  backspace(): void {
+    this.write({ type: "Backspace" });
   }
 
   clear(): void {
@@ -145,6 +159,7 @@ class RoomView {
     this.input = el("input", {
       className: "capture",
       type: "text",
+      value: SENTINEL,
       autocomplete: "off",
       autocapitalize: "off",
       autocorrect: false,
@@ -178,15 +193,30 @@ class RoomView {
 
   apply(msg: ServerMsg): void {
     const box = this.boxes[msg.clientId];
-    if (msg.type === "TaggedCodepoint") box.push(msg.codepoint);
-    else box.clear();
+    switch (msg.type) {
+      case "TaggedCodepoint":
+        box.push(msg.codepoint);
+        break;
+      case "TaggedBackspace":
+        box.pop();
+        break;
+      case "TaggedClear":
+        box.clear();
+        break;
+    }
   }
 
   private wireCapture(): void {
     const { input, session } = this;
     const flush = () => {
-      if (input.value) session.send(input.value);
-      input.value = "";
+      const { value } = input;
+      if (value.startsWith(SENTINEL)) {
+        session.send(value.slice(SENTINEL.length));
+      } else {
+        session.backspace();
+        session.send(value);
+      }
+      input.value = SENTINEL;
     };
     const signal = session.signal;
     input.addEventListener(
@@ -202,7 +232,7 @@ class RoomView {
       (event) => {
         if (event.key === "Escape") {
           event.preventDefault();
-          input.value = "";
+          input.value = SENTINEL;
           session.clear();
         }
       },

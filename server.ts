@@ -20,9 +20,18 @@ const RATE_WINDOW_MS = 1000;
 type Subscriber = (msg: ServerMsg) => void;
 
 function tag(id: number, msg: ClientMsg): ServerMsg {
-  return msg.type === "Codepoint"
-    ? { type: "TaggedCodepoint", clientId: id, codepoint: msg.codepoint }
-    : { type: "TaggedClear", clientId: id };
+  switch (msg.type) {
+    case "Codepoint":
+      return {
+        type: "TaggedCodepoint",
+        clientId: id,
+        codepoint: msg.codepoint,
+      };
+    case "Backspace":
+      return { type: "TaggedBackspace", clientId: id };
+    case "Clear":
+      return { type: "TaggedClear", clientId: id };
+  }
 }
 
 class Room {
