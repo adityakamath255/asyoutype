@@ -26,17 +26,21 @@ const PALETTE = [
 // the box clips overflow visually; this just caps what it holds in memory
 const MAX_CHARS = 256;
 
-const HELP = "type to stream";
+const HELP = matchMedia("(pointer: coarse)").matches
+  ? "tap to type"
+  : "type to stream";
 
-type Props = Partial<Omit<HTMLElement, "style">> & {
+type Tag = keyof HTMLElementTagNameMap;
+
+type Props<K extends Tag> = Partial<Omit<HTMLElementTagNameMap[K], "style">> & {
   style?: Partial<CSSStyleDeclaration>;
 };
 
-function el(
-  tag: string,
-  { style, ...props }: Props = {},
+function el<K extends Tag>(
+  tag: K,
+  { style, ...props }: Props<K> = {},
   ...children: (Node | string)[]
-): HTMLElement {
+): HTMLElementTagNameMap[K] {
   const node = Object.assign(document.createElement(tag), props);
   if (style) Object.assign(node.style, style);
   node.append(...children);
@@ -138,13 +142,15 @@ class RoomView {
       (_, i) => new Box(i, i === session.clientId),
     );
 
-    this.input = el("input", { className: "capture" }) as HTMLInputElement;
-    this.input.type = "text";
-    this.input.autocomplete = "off";
-    this.input.autocapitalize = "off";
-    this.input.spellcheck = false;
-    this.input.setAttribute("autocorrect", "off");
-    this.input.placeholder = "type…";
+    this.input = el("input", {
+      className: "capture",
+      type: "text",
+      autocomplete: "off",
+      autocapitalize: "off",
+      autocorrect: false,
+      spellcheck: false,
+      ariaLabel: HELP,
+    });
 
     const clearButton = el("button", {
       className: "clear",
@@ -167,7 +173,7 @@ class RoomView {
   }
 
   focus(): void {
-    this.input.focus();
+    this.input.focus({ preventScroll: true });
   }
 
   apply(msg: ServerMsg): void {
