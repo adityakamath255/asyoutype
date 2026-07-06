@@ -68,11 +68,13 @@ class Room {
     this.broadcast({
       type: "Occupancy",
       slots: this.slots.map((o) => o && { nick: o.nick, color: o.color }),
-    });
+    }, null);
   }
 
-  broadcast(msg: ServerMsg): void {
-    for (const slot of this.slots) slot?.sub(msg);
+  broadcast(msg: ServerMsg, skip: number | null): void {
+    this.slots.forEach((slot, id) => {
+      if (id !== skip) slot?.sub(msg);
+    });
   }
 }
 
@@ -147,7 +149,7 @@ class Membership {
   }
 
   feed(msg: ClientMsg): void {
-    this.room.broadcast(tag(this.clientId, msg));
+    this.room.broadcast(tag(this.clientId, msg), this.clientId);
   }
 
   leave(): void {

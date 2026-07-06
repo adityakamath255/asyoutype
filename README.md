@@ -41,11 +41,12 @@ JSON, one message per frame. Two phases:
    replies `ValidRoom` (with the assigned id and capacity) or `InvalidRoom`
    (with a reason, then closes).
 2. **Streaming.** The client sends `ClientMsg` (a codepoint, a backspace, or a
-   clear); the server echoes back `ServerMsg` stamped with the sender's
-   `clientId` so every client knows which box to update. Whenever membership
-   changes the server also broadcasts `Occupancy`, the full per-slot map: `null`
-   for an empty slot, otherwise the occupant's `{ nick, color }`. Clients dim
-   empty boxes and derive each box's label and colour from the latest snapshot.
+   clear) and renders it into its own box at once, no round-trip; the server
+   relays it to the _other_ members as a `ServerMsg` stamped with the sender's
+   `clientId` so they know which box to update. Whenever membership changes the
+   server also broadcasts `Occupancy`, the full per-slot map: `null` for an
+   empty slot, otherwise the occupant's `{ nick, color }`. Clients dim empty
+   boxes and derive each box's label and colour from the latest snapshot.
 
 ### Rooms and identity
 
@@ -54,8 +55,9 @@ slot; that index is your client id and your box. Leaving frees the slot for the
 next joiner.
 
 Membership tracks the WebSocket: when a connection closes for any reason the
-slot frees, and the room is dropped if it just emptied. Broadcasts go to every
-subscriber including the sender.
+slot frees, and the room is dropped if it just emptied. `Occupancy` snapshots go
+to every subscriber; a member's keystrokes go to everyone else, since it renders
+its own box locally.
 
 ## Deploying it
 

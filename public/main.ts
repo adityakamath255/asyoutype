@@ -118,24 +118,10 @@ class Session {
     return this.ended.signal;
   }
 
-  private write(msg: ClientMsg): void {
+  send(msg: ClientMsg): void {
     if (this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(msg));
     }
-  }
-
-  send(text: string): void {
-    for (const codepoint of text) {
-      if (isCodepoint(codepoint)) this.write({ type: "Codepoint", codepoint });
-    }
-  }
-
-  backspace(): void {
-    this.write({ type: "Backspace" });
-  }
-
-  clear(): void {
-    this.write({ type: "Clear" });
   }
 
   onMessage(handler: (msg: ServerMsg) => void): void {
@@ -148,16 +134,12 @@ class Session {
       { signal: this.signal },
     );
   }
-
-  onClose(handler: () => void): void {
-    this.signal.addEventListener("abort", handler, { once: true });
-  }
 }
 
 class Capture {
   readonly el: HTMLInputElement;
 
-  constructor(session: Session) {
+  constructor(sink: (msg: ClientMsg) => void, signal: AbortSignal) {
     this.el = el("input", {
       className: "capture",
       type: "text",
@@ -172,18 +154,22 @@ class Capture {
     const reset = () => {
       this.el.value = SENTINEL;
     };
+    const type = (text: string) => {
+      for (const codepoint of text) {
+        if (isCodepoint(codepoint)) sink({ type: "Codepoint", codepoint });
+      }
+    };
     const flush = () => {
       const { value } = this.el;
       if (value.startsWith(SENTINEL)) {
-        session.send(value.slice(SENTINEL.length));
+        type(value.slice(SENTINEL.length));
       } else {
-        session.backspace();
-        session.send(value);
+        sink({ type: "Backspace" });
+        type(value);
       }
       reset();
     };
 
-    const signal = session.signal;
     this.el.addEventListener(
       "input",
       (event) => {
@@ -198,7 +184,7 @@ class Capture {
         if (event.key === "Escape") {
           event.preventDefault();
           reset();
-          session.clear();
+          sink({ type: "Clear" });
         }
       },
       { signal },
@@ -207,6 +193,20 @@ class Capture {
 
   focus(): void {
     this.el.focus({ preventScroll: true });
+  }
+}
+
+function applyClient(box: Box, msg: ClientMsg): void {
+  switch (msg.type) {
+    case "Codepoint":
+      box.push(msg.codepoint);
+      break;
+    case "Backspace":
+      box.pop();
+      break;
+    case "Clear":
+      box.clear();
+      break;
   }
 }
 
@@ -220,12 +220,17 @@ class RoomView {
       { length: session.capacity },
       (_, i) => new Box(i, i === session.clientId),
     );
-    this.capture = new Capture(session);
+    const ownBox = this.boxes[session.clientId];
+    const sink = (msg: ClientMsg) => {
+      session.send(msg);
+      applyClient(ownBox, msg);
+    };
+    this.capture = new Capture(sink, session.signal);
 
     const clearButton = el("button", {
       className: "clear",
       textContent: "clear",
-      onclick: () => session.clear(),
+      onclick: () => sink({ type: "Clear" }),
     });
 
     this.el = el(
@@ -349,7 +354,9 @@ class App {
         document.title = `${view.name} [${n}/${session.capacity}]`;
       }
     });
-    session.onClose(() => this.show(null));
+    session.signal.addEventListener("abort", () => this.show(null), {
+      once: true,
+    });
     view.focus();
   }
 
