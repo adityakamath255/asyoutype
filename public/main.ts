@@ -236,9 +236,9 @@ class RoomView {
       el("div", { className: "help", textContent: HELP }, clearButton),
       this.capture.el,
     );
-    this.el.addEventListener("click", () => this.focus(), {
-      signal: session.signal,
-    });
+    const { signal } = session;
+    globalThis.addEventListener("click", () => this.focus(), { signal });
+    globalThis.addEventListener("focus", () => this.focus(), { signal });
   }
 
   focus(): void {
