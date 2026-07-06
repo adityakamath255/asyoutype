@@ -8,20 +8,29 @@ import {
   type ClientMsg,
   decodeServerInit,
   decodeServerMsg,
+  PALETTE_SIZE,
   type ServerInit,
   type ServerMsg,
+  type SlotInfo,
 } from "../protocol.ts";
 
 const PALETTE = [
-  "243,139,168",
-  "203,166,247",
-  "250,179,135",
-  "137,180,250",
-  "249,226,175",
-  "148,226,213",
-  "166,227,161",
+  "245,224,220",
+  "242,205,205",
   "245,194,231",
+  "203,166,247",
+  "243,139,168",
+  "235,160,172",
+  "250,179,135",
+  "249,226,175",
+  "166,227,161",
+  "148,226,213",
+  "137,220,235",
+  "116,199,236",
+  "137,180,250",
+  "180,190,254",
 ];
+if (PALETTE.length !== PALETTE_SIZE) throw new Error("palette size mismatch");
 
 // the box clips overflow visually; this just caps what it holds in memory
 const MAX_CHARS = 256;
@@ -51,23 +60,13 @@ function el<K extends Tag>(
 class Box {
   readonly el: HTMLElement;
   private line: HTMLElement;
+  private tag: HTMLElement;
   private codepoints: string[] = [];
 
-  constructor(index: number, isMe: boolean) {
+  constructor(private index: number, private isMe: boolean) {
     this.line = el("div", { className: "line" });
-    this.el = el(
-      "div",
-      { className: "box" },
-      el("span", {
-        className: "tag",
-        textContent: isMe ? `${index + 1} [you]` : `${index + 1}`,
-      }),
-      this.line,
-    );
-    this.el.style.setProperty(
-      "--slot",
-      `rgb(${PALETTE[index % PALETTE.length]})`,
-    );
+    this.tag = el("span", { className: "tag", textContent: `${index + 1}` });
+    this.el = el("div", { className: "box" }, this.tag, this.line);
   }
 
   private render(): void {
@@ -90,9 +89,14 @@ class Box {
     this.render();
   }
 
-  setOccupied(occupied: boolean): void {
-    if (!occupied) this.clear();
-    this.el.classList.toggle("occupied", occupied);
+  setSlot(info: SlotInfo | null): void {
+    if (!info) this.clear();
+    this.el.classList.toggle("occupied", info !== null);
+    this.tag.hidden = info === null;
+    if (info) {
+      this.tag.textContent = this.isMe ? `${info.nick} [you]` : info.nick;
+      this.el.style.setProperty("--slot", `rgb(${PALETTE[info.color]})`);
+    }
   }
 }
 
@@ -253,7 +257,7 @@ class RoomView {
         this.boxes[msg.clientId].clear();
         break;
       case "Occupancy":
-        this.boxes.forEach((box, i) => box.setOccupied(msg.slots[i] === true));
+        this.boxes.forEach((box, i) => box.setSlot(msg.slots[i]));
         break;
     }
   }
@@ -270,6 +274,7 @@ class App {
   private readonly baseTitle = document.title;
 
   private readonly nameField = this.field("name") as HTMLInputElement;
+  private readonly nickField = this.field("nick") as HTMLInputElement;
   private readonly capacityField = this.field("capacity") as HTMLInputElement;
   private readonly modeField = this.field("mode") as RadioNodeList;
 
@@ -278,6 +283,7 @@ class App {
   }
 
   start(): void {
+    this.buildColors();
     this.form.addEventListener("submit", (event) => {
       event.preventDefault();
       this.errorEl.textContent = "";
@@ -288,15 +294,43 @@ class App {
     if (deeplinked) {
       this.modeField.value = "join";
       this.nameField.value = deeplinked;
-      this.form.requestSubmit();
+      this.nickField.focus();
     }
+  }
+
+  private buildColors(): void {
+    const container = document.getElementById("colors") as HTMLElement;
+    container.append(...PALETTE.map((rgb, i) => {
+      const dot = el("span", { className: "dot" });
+      dot.style.background = `rgb(${rgb})`;
+      return el(
+        "label",
+        { className: "swatch" },
+        el("input", {
+          type: "radio",
+          name: "color",
+          value: String(i),
+          checked: i === 0,
+        }),
+        dot,
+      );
+    }));
   }
 
   private readForm(): ClientInit {
     const name = this.nameField.value;
+    const info: SlotInfo = {
+      nick: this.nickField.value,
+      color: Number((this.field("color") as RadioNodeList).value),
+    };
     return this.modeField.value === "create"
-      ? { type: "CreateRoom", name, capacity: Number(this.capacityField.value) }
-      : { type: "JoinRoom", name };
+      ? {
+        type: "CreateRoom",
+        name,
+        capacity: Number(this.capacityField.value),
+        ...info,
+      }
+      : { type: "JoinRoom", name, ...info };
   }
 
   private async enter(init: ClientInit): Promise<void> {

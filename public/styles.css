@@ -45,7 +45,6 @@ form {
   text-align: center;
   padding: 0.45rem;
   border: 1px solid var(--overlay);
-  border-radius: 8px;
   cursor: pointer;
 }
 .modes input {
@@ -58,6 +57,40 @@ form {
 form:not(:has(input[value="create"]:checked)) input[name="capacity"] {
   display: none;
 }
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.picker > span {
+  font-size: 0.85rem;
+  color: var(--subtext);
+}
+.colors {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.6rem;
+}
+.swatch {
+  cursor: pointer;
+}
+.swatch input {
+  display: none;
+}
+.swatch .dot {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 3px solid transparent;
+}
+.swatch:hover .dot {
+  filter: brightness(1.15);
+}
+.swatch input:checked + .dot {
+  box-shadow: inset 0 0 0 3px var(--base);
+
+}
 input[type="text"],
 input[type="number"] {
   font: inherit;
@@ -66,7 +99,6 @@ input[type="number"] {
   color: inherit;
   background: var(--surface);
   border: 1px solid var(--overlay);
-  border-radius: 8px;
 }
 button {
   font: inherit;
@@ -95,8 +127,8 @@ button:hover {
 .box {
   position: relative;
   width: 100%;
-  height: 2.6rem;
-  border: 1px solid var(--overlay);
+  height: 3rem;
+  border: 2px solid var(--overlay);
   color: var(--subtext);
 }
 .box.occupied {

@@ -1,6 +1,10 @@
+export const PALETTE_SIZE = 14;
+
+export type SlotInfo = { nick: string; color: number };
+
 export type ClientInit =
-  | { type: "CreateRoom"; name: string; capacity: number }
-  | { type: "JoinRoom"; name: string };
+  | ({ type: "CreateRoom"; name: string; capacity: number } & SlotInfo)
+  | ({ type: "JoinRoom"; name: string } & SlotInfo);
 
 export type ServerInit =
   | { type: "ValidRoom"; clientId: number; capacity: number }
@@ -15,7 +19,7 @@ export type ServerMsg =
   | { type: "TaggedCodepoint"; clientId: number; codepoint: string }
   | { type: "TaggedBackspace"; clientId: number }
   | { type: "TaggedClear"; clientId: number }
-  | { type: "Occupancy"; slots: boolean[] };
+  | { type: "Occupancy"; slots: (SlotInfo | null)[] };
 
 type Field = (x: unknown) => boolean;
 
@@ -23,8 +27,11 @@ const str: Field = (x) => typeof x === "string";
 const int: Field = (x) => Number.isInteger(x);
 // a single codepoint may span two UTF-16 units, so count by codepoint.
 const char: Field = (x) => str(x) && [...x as string].length === 1;
-const bools: Field = (x) =>
-  Array.isArray(x) && x.every((b) => typeof b === "boolean");
+const isRecord = (x: unknown): x is Record<string, unknown> =>
+  typeof x === "object" && x !== null && !Array.isArray(x);
+const slots: Field = (x) =>
+  Array.isArray(x) &&
+  x.every((e) => e === null || (isRecord(e) && str(e.nick) && int(e.color)));
 
 // each variant of a union is a `type` tag mapped to the checks its fields must
 // pass. a decoder validates the tag, then every field, and copies the verified
@@ -53,8 +60,8 @@ function decoder<T>(schema: Schema): (data: string) => T | null {
 }
 
 export const decodeClientInit = decoder<ClientInit>({
-  CreateRoom: { name: str, capacity: int },
-  JoinRoom: { name: str },
+  CreateRoom: { name: str, capacity: int, nick: str, color: int },
+  JoinRoom: { name: str, nick: str, color: int },
 });
 
 export const decodeClientMsg = decoder<ClientMsg>({
@@ -72,5 +79,5 @@ export const decodeServerMsg = decoder<ServerMsg>({
   TaggedCodepoint: { clientId: int, codepoint: char },
   TaggedBackspace: { clientId: int },
   TaggedClear: { clientId: int },
-  Occupancy: { slots: bools },
+  Occupancy: { slots },
 });

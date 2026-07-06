@@ -15,9 +15,9 @@ deno task start          # http://localhost:8000
 deno task start 4000     # or pick a port
 ```
 
-Open the URL, choose create or join, enter a room name (4-10 chars) and, for
-create, a capacity (1-8). Type to stream, backspace to retract, escape to clear.
-Open the URL in another tab or machine to join.
+Open the URL, choose create or join, enter a room name (4-10 chars), pick your
+own name and colour and, for create, a capacity (1-8). Type to stream, backspace
+to retract, escape to clear. Open the URL in another tab or machine to join.
 
 ## Layout
 
@@ -43,9 +43,9 @@ JSON, one message per frame. Two phases:
 2. **Streaming.** The client sends `ClientMsg` (a codepoint, a backspace, or a
    clear); the server echoes back `ServerMsg` stamped with the sender's
    `clientId` so every client knows which box to update. Whenever membership
-   changes the server also broadcasts `Occupancy`, the full boolean map of which
-   slots are taken; clients dim empty boxes and derive everything else from the
-   latest snapshot.
+   changes the server also broadcasts `Occupancy`, the full per-slot map: `null`
+   for an empty slot, otherwise the occupant's `{ nick, color }`. Clients dim
+   empty boxes and derive each box's label and colour from the latest snapshot.
 
 ### Rooms and identity
 

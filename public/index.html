@@ -24,7 +24,24 @@
           placeholder="room name (4-10 chars)"
           required
         />
-        <input type="number" name="capacity" value="4" min="1" max="8" />
+        <input
+          type="number"
+          name="capacity"
+          placeholder="room size (1-8)"
+          min="1"
+          max="8"
+        />
+        <input
+          type="text"
+          name="nick"
+          placeholder="your name"
+          maxlength="16"
+          required
+        />
+        <div class="picker">
+          <span>your colour</span>
+          <div class="colors" id="colors"></div>
+        </div>
         <button type="submit">enter</button>
         <div class="error" id="error"></div>
       </form>

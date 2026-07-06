@@ -4,14 +4,18 @@ import {
   type ClientMsg,
   decodeClientInit,
   decodeClientMsg,
+  PALETTE_SIZE,
   type ServerInit,
   type ServerMsg,
+  type SlotInfo,
 } from "./protocol.ts";
 
 const MIN_NAME_LEN = 4;
 const MAX_NAME_LEN = 10;
 const MIN_CAPACITY = 1;
 const MAX_CAPACITY = 8;
+const MIN_NICK_LEN = 1;
+const MAX_NICK_LEN = 16;
 
 const MAX_FRAME = 1024;
 const RATE_LIMIT = 256;
@@ -34,8 +38,10 @@ function tag(id: number, msg: ClientMsg): ServerMsg {
   }
 }
 
+type Occupant = { sub: Subscriber } & SlotInfo;
+
 class Room {
-  private slots: (Subscriber | null)[];
+  private slots: (Occupant | null)[];
 
   constructor(capacity: number, private readonly onEmpty: () => void) {
     this.slots = Array(capacity).fill(null);
@@ -45,10 +51,10 @@ class Room {
     return this.slots.length;
   }
 
-  enter(sub: Subscriber): number | null {
+  enter(occupant: Occupant): number | null {
     const id = this.slots.indexOf(null);
     if (id === -1) return null;
-    this.slots[id] = sub;
+    this.slots[id] = occupant;
     return id;
   }
 
@@ -61,12 +67,12 @@ class Room {
   announce(): void {
     this.broadcast({
       type: "Occupancy",
-      slots: this.slots.map((slot) => slot !== null),
+      slots: this.slots.map((o) => o && { nick: o.nick, color: o.color }),
     });
   }
 
   broadcast(msg: ServerMsg): void {
-    for (const slot of this.slots) slot?.(msg);
+    for (const slot of this.slots) slot?.sub(msg);
   }
 }
 
@@ -87,10 +93,22 @@ function validateCapacity(capacity: number): string | null {
     : `Room capacity must be between ${MIN_CAPACITY} and ${MAX_CAPACITY} members`;
 }
 
+function validateIdentity(id: SlotInfo): string | null {
+  const length = [...id.nick].length;
+  if (length < MIN_NICK_LEN || length > MAX_NICK_LEN) {
+    return `Name must be between ${MIN_NICK_LEN} and ${MAX_NICK_LEN} chars`;
+  }
+  if (id.color < 0 || id.color >= PALETTE_SIZE) return "Invalid colour";
+  return null;
+}
+
 class Lobby {
   private readonly rooms = new Map<string, Room>();
 
   join(init: ClientInit, sub: Subscriber): JoinResult {
+    const badIdentity = validateIdentity(init);
+    if (badIdentity) return { ok: false, msg: badIdentity };
+
     let room: Room;
     if (init.type === "CreateRoom") {
       const invalid = validateName(init.name) ??
@@ -107,7 +125,7 @@ class Lobby {
       room = existing;
     }
 
-    const id = room.enter(sub);
+    const id = room.enter({ sub, nick: init.nick, color: init.color });
     if (id === null) return { ok: false, msg: "Room is full!" };
     return { ok: true, membership: new Membership(room, id) };
   }
