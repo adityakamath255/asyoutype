@@ -15,9 +15,10 @@ deno task start          # http://localhost:8000
 deno task start 4000     # or pick a port
 ```
 
-Open the URL, choose create or join, enter a room name (4-10 chars), pick your
-own name and colour and, for create, a capacity (1-8). Type to stream, backspace
-to retract, escape to clear. Open the URL in another tab or machine to join.
+Open the URL, choose create or join, enter a room name (up to 40 chars), pick
+your own name and colour and, for create, a capacity (1-8). Type to stream,
+backspace to retract, escape to clear. Open the URL in another tab or machine to
+join.
 
 ## Layout
 

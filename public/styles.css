@@ -47,12 +47,22 @@ form {
   border: 1px solid var(--overlay);
   cursor: pointer;
 }
-.modes input {
-  display: none;
+.modes input,
+.swatch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  clip-path: inset(50%);
+  overflow: hidden;
 }
 .modes label:has(input:checked) {
   background: var(--surface);
   border-color: var(--text);
+}
+.modes label:has(input:focus-visible) {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
 }
 form:not(:has(input[value="create"]:checked)) input[name="capacity"] {
   display: none;
@@ -74,9 +84,6 @@ form:not(:has(input[value="create"]:checked)) input[name="capacity"] {
 .swatch {
   cursor: pointer;
 }
-.swatch input {
-  display: none;
-}
 .swatch .dot {
   display: block;
   width: 100%;
@@ -89,7 +96,6 @@ form:not(:has(input[value="create"]:checked)) input[name="capacity"] {
 }
 .swatch input:checked + .dot {
   box-shadow: inset 0 0 0 3px var(--base);
-
 }
 input[type="text"],
 input[type="number"] {

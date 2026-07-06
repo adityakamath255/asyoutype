@@ -288,7 +288,9 @@ class App {
   }
 
   start(): void {
-    this.buildColors();
+    const identity = loadIdentity();
+    this.buildColors(identity?.color ?? 0);
+    if (identity) this.nickField.value = identity.nick;
     this.form.addEventListener("submit", (event) => {
       event.preventDefault();
       this.errorEl.textContent = "";
@@ -303,7 +305,7 @@ class App {
     }
   }
 
-  private buildColors(): void {
+  private buildColors(selected: number): void {
     const container = document.getElementById("colors") as HTMLElement;
     container.append(...PALETTE.map((rgb, i) => {
       const dot = el("span", { className: "dot" });
@@ -315,7 +317,7 @@ class App {
           type: "radio",
           name: "color",
           value: String(i),
-          checked: i === 0,
+          checked: i === selected,
         }),
         dot,
       );
@@ -323,9 +325,9 @@ class App {
   }
 
   private readForm(): ClientInit {
-    const name = this.nameField.value;
+    const name = this.nameField.value.trim();
     const info: SlotInfo = {
-      nick: this.nickField.value,
+      nick: this.nickField.value.trim(),
       color: Number((this.field("color") as RadioNodeList).value),
     };
     return this.modeField.value === "create"
@@ -344,6 +346,7 @@ class App {
       this.errorEl.textContent = result.error;
       return;
     }
+    saveIdentity({ nick: init.nick, color: init.color });
     const { session } = result;
     const view = new RoomView(session, init.name);
     this.show(view);
@@ -408,6 +411,27 @@ function readHash(): string {
   } catch {
     return "";
   }
+}
+
+const IDENTITY_KEY = "asyoutype:identity";
+
+function loadIdentity(): SlotInfo | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(IDENTITY_KEY) ?? "null");
+    if (
+      typeof v?.nick === "string" &&
+      Number.isInteger(v?.color) && v.color >= 0 && v.color < PALETTE_SIZE
+    ) {
+      return { nick: v.nick, color: v.color };
+    }
+  } catch { /* absent, malformed, or storage unavailable */ }
+  return null;
+}
+
+function saveIdentity(info: SlotInfo): void {
+  try {
+    localStorage.setItem(IDENTITY_KEY, JSON.stringify(info));
+  } catch { /* storage unavailable */ }
 }
 
 new App().start();

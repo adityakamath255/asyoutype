@@ -10,11 +10,8 @@ import {
   type SlotInfo,
 } from "./protocol.ts";
 
-const MIN_NAME_LEN = 4;
-const MAX_NAME_LEN = 10;
-const MIN_CAPACITY = 1;
+const MAX_NAME_LEN = 40;
 const MAX_CAPACITY = 8;
-const MIN_NICK_LEN = 1;
 const MAX_NICK_LEN = 16;
 
 const MAX_FRAME = 1024;
@@ -84,21 +81,24 @@ type JoinResult =
 
 function validateName(name: string): string | null {
   const length = [...name].length;
-  return length >= MIN_NAME_LEN && length <= MAX_NAME_LEN
-    ? null
-    : `Room name must be between ${MIN_NAME_LEN} and ${MAX_NAME_LEN} chars`;
+  if (length === 0) return "Room name can't be blank";
+  if (length > MAX_NAME_LEN) {
+    return `Room name must be at most ${MAX_NAME_LEN} chars`;
+  }
+  return null;
 }
 
 function validateCapacity(capacity: number): string | null {
-  return capacity >= MIN_CAPACITY && capacity <= MAX_CAPACITY
+  return capacity >= 1 && capacity <= MAX_CAPACITY
     ? null
-    : `Room capacity must be between ${MIN_CAPACITY} and ${MAX_CAPACITY} members`;
+    : `Room capacity must be between 1 and ${MAX_CAPACITY} members`;
 }
 
 function validateIdentity(id: SlotInfo): string | null {
   const length = [...id.nick].length;
-  if (length < MIN_NICK_LEN || length > MAX_NICK_LEN) {
-    return `Name must be between ${MIN_NICK_LEN} and ${MAX_NICK_LEN} chars`;
+  if (length === 0) return "Name can't be blank";
+  if (length > MAX_NICK_LEN) {
+    return `Name must be at most ${MAX_NICK_LEN} chars`;
   }
   if (id.color < 0 || id.color >= PALETTE_SIZE) return "Invalid colour";
   return null;
@@ -108,26 +108,27 @@ class Lobby {
   private readonly rooms = new Map<string, Room>();
 
   join(init: ClientInit, sub: Subscriber): JoinResult {
-    const badIdentity = validateIdentity(init);
+    const nick = init.nick.trim();
+    const badIdentity = validateIdentity({ nick, color: init.color });
     if (badIdentity) return { ok: false, msg: badIdentity };
 
+    const name = init.name.trim();
     let room: Room;
     if (init.type === "CreateRoom") {
-      const invalid = validateName(init.name) ??
-        validateCapacity(init.capacity);
+      const invalid = validateName(name) ?? validateCapacity(init.capacity);
       if (invalid) return { ok: false, msg: invalid };
-      if (this.rooms.has(init.name)) {
+      if (this.rooms.has(name)) {
         return { ok: false, msg: "Room name has been taken!" };
       }
-      room = new Room(init.capacity, () => this.rooms.delete(init.name));
-      this.rooms.set(init.name, room);
+      room = new Room(init.capacity, () => this.rooms.delete(name));
+      this.rooms.set(name, room);
     } else {
-      const existing = this.rooms.get(init.name);
+      const existing = this.rooms.get(name);
       if (!existing) return { ok: false, msg: "Room does not exist!" };
       room = existing;
     }
 
-    const id = room.enter({ sub, nick: init.nick, color: init.color });
+    const id = room.enter({ sub, nick, color: init.color });
     if (id === null) return { ok: false, msg: "Room is full!" };
     return { ok: true, membership: new Membership(room, id) };
   }
