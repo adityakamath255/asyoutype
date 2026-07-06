@@ -54,8 +54,15 @@ class Room {
 
   leave(id: number): void {
     this.slots[id] = null;
-    this.broadcast({ type: "TaggedClear", clientId: id });
     if (this.slots.every((slot) => slot === null)) this.onEmpty();
+    else this.announce();
+  }
+
+  announce(): void {
+    this.broadcast({
+      type: "Occupancy",
+      slots: this.slots.map((slot) => slot !== null),
+    });
   }
 
   broadcast(msg: ServerMsg): void {
@@ -112,8 +119,13 @@ class Membership {
     readonly clientId: number,
   ) {}
 
-  get capacity(): number {
-    return this.room.capacity;
+  welcome(send: (msg: ServerInit) => void): void {
+    send({
+      type: "ValidRoom",
+      clientId: this.clientId,
+      capacity: this.room.capacity,
+    });
+    this.room.announce();
   }
 
   feed(msg: ClientMsg): void {
@@ -173,13 +185,8 @@ function accept(
     return null;
   }
 
-  const { membership } = result;
-  send({
-    type: "ValidRoom",
-    clientId: membership.clientId,
-    capacity: membership.capacity,
-  });
-  return membership;
+  result.membership.welcome(send);
+  return result.membership;
 }
 
 function handleSocket(lobby: Lobby, socket: WebSocket) {

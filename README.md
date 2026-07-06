@@ -42,7 +42,10 @@ JSON, one message per frame. Two phases:
    (with a reason, then closes).
 2. **Streaming.** The client sends `ClientMsg` (a codepoint, a backspace, or a
    clear); the server echoes back `ServerMsg` stamped with the sender's
-   `clientId` so every client knows which box to update.
+   `clientId` so every client knows which box to update. Whenever membership
+   changes the server also broadcasts `Occupancy`, the full boolean map of which
+   slots are taken; clients dim empty boxes and derive everything else from the
+   latest snapshot.
 
 ### Rooms and identity
 

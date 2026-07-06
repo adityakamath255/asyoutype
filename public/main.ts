@@ -36,17 +36,14 @@ const SENTINEL = "​";
 
 type Tag = keyof HTMLElementTagNameMap;
 
-type Props<K extends Tag> = Partial<Omit<HTMLElementTagNameMap[K], "style">> & {
-  style?: Partial<CSSStyleDeclaration>;
-};
+type Props<K extends Tag> = Partial<Omit<HTMLElementTagNameMap[K], "style">>;
 
 function el<K extends Tag>(
   tag: K,
-  { style, ...props }: Props<K> = {},
+  props: Props<K> = {},
   ...children: (Node | string)[]
 ): HTMLElementTagNameMap[K] {
   const node = Object.assign(document.createElement(tag), props);
-  if (style) Object.assign(node.style, style);
   node.append(...children);
   return node;
 }
@@ -57,16 +54,19 @@ class Box {
   private codepoints: string[] = [];
 
   constructor(index: number, isMe: boolean) {
-    const color = `rgb(${PALETTE[index % PALETTE.length]})`;
     this.line = el("div", { className: "line" });
     this.el = el(
       "div",
-      { className: "box", style: { borderColor: color, color } },
+      { className: "box" },
       el("span", {
         className: "tag",
         textContent: isMe ? `${index + 1} [you]` : `${index + 1}`,
       }),
       this.line,
+    );
+    this.el.style.setProperty(
+      "--slot",
+      `rgb(${PALETTE[index % PALETTE.length]})`,
     );
   }
 
@@ -88,6 +88,11 @@ class Box {
   clear(): void {
     this.codepoints.length = 0;
     this.render();
+  }
+
+  setOccupied(occupied: boolean): void {
+    if (!occupied) this.clear();
+    this.el.classList.toggle("occupied", occupied);
   }
 }
 
@@ -145,18 +150,11 @@ class Session {
   }
 }
 
-class RoomView {
-  readonly el: HTMLElement;
-  private boxes: Box[];
-  private input: HTMLInputElement;
+class Capture {
+  readonly el: HTMLInputElement;
 
-  constructor(private session: Session, readonly name: string) {
-    this.boxes = Array.from(
-      { length: session.capacity },
-      (_, i) => new Box(i, i === session.clientId),
-    );
-
-    this.input = el("input", {
+  constructor(session: Session) {
+    this.el = el("input", {
       className: "capture",
       type: "text",
       value: SENTINEL,
@@ -166,6 +164,59 @@ class RoomView {
       spellcheck: false,
       ariaLabel: HELP,
     });
+
+    const reset = () => {
+      this.el.value = SENTINEL;
+    };
+    const flush = () => {
+      const { value } = this.el;
+      if (value.startsWith(SENTINEL)) {
+        session.send(value.slice(SENTINEL.length));
+      } else {
+        session.backspace();
+        session.send(value);
+      }
+      reset();
+    };
+
+    const signal = session.signal;
+    this.el.addEventListener(
+      "input",
+      (event) => {
+        if (!(event as InputEvent).isComposing) flush();
+      },
+      { signal },
+    );
+    this.el.addEventListener("compositionend", flush, { signal });
+    this.el.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          reset();
+          session.clear();
+        }
+      },
+      { signal },
+    );
+  }
+
+  focus(): void {
+    this.el.focus({ preventScroll: true });
+  }
+}
+
+class RoomView {
+  readonly el: HTMLElement;
+  private boxes: Box[];
+  private capture: Capture;
+
+  constructor(session: Session, readonly name: string) {
+    this.boxes = Array.from(
+      { length: session.capacity },
+      (_, i) => new Box(i, i === session.clientId),
+    );
+    this.capture = new Capture(session);
 
     const clearButton = el("button", {
       className: "clear",
@@ -179,65 +230,32 @@ class RoomView {
       el("div", { className: "room-name", textContent: name }),
       ...this.boxes.map((box) => box.el),
       el("div", { className: "help", textContent: HELP }, clearButton),
-      this.input,
+      this.capture.el,
     );
     this.el.addEventListener("click", () => this.focus(), {
       signal: session.signal,
     });
-    this.wireCapture();
   }
 
   focus(): void {
-    this.input.focus({ preventScroll: true });
+    this.capture.focus();
   }
 
   apply(msg: ServerMsg): void {
-    const box = this.boxes[msg.clientId];
     switch (msg.type) {
       case "TaggedCodepoint":
-        box.push(msg.codepoint);
+        this.boxes[msg.clientId].push(msg.codepoint);
         break;
       case "TaggedBackspace":
-        box.pop();
+        this.boxes[msg.clientId].pop();
         break;
       case "TaggedClear":
-        box.clear();
+        this.boxes[msg.clientId].clear();
+        break;
+      case "Occupancy":
+        this.boxes.forEach((box, i) => box.setOccupied(msg.slots[i] === true));
         break;
     }
-  }
-
-  private wireCapture(): void {
-    const { input, session } = this;
-    const flush = () => {
-      const { value } = input;
-      if (value.startsWith(SENTINEL)) {
-        session.send(value.slice(SENTINEL.length));
-      } else {
-        session.backspace();
-        session.send(value);
-      }
-      input.value = SENTINEL;
-    };
-    const signal = session.signal;
-    input.addEventListener(
-      "input",
-      (event) => {
-        if (!(event as InputEvent).isComposing) flush();
-      },
-      { signal },
-    );
-    input.addEventListener("compositionend", flush, { signal });
-    input.addEventListener(
-      "keydown",
-      (event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          input.value = SENTINEL;
-          session.clear();
-        }
-      },
-      { signal },
-    );
   }
 }
 
@@ -290,14 +308,20 @@ class App {
     const { session } = result;
     const view = new RoomView(session, init.name);
     this.show(view);
-    session.onMessage((msg) => view.apply(msg));
+    session.onMessage((msg) => {
+      view.apply(msg);
+      if (msg.type === "Occupancy") {
+        const n = msg.slots.filter(Boolean).length;
+        document.title = `${view.name} [${n}/${session.capacity}]`;
+      }
+    });
     session.onClose(() => this.show(null));
     view.focus();
   }
 
   private show(view: RoomView | null): void {
     const hash = view ? "#" + encodeURIComponent(view.name) : "";
-    document.title = view ? view.name : this.baseTitle;
+    if (!view) document.title = this.baseTitle;
     history.replaceState(null, "", location.pathname + location.search + hash);
     this.room.replaceChildren(...(view ? [view.el] : []));
     this.form.hidden = view !== null;

@@ -14,7 +14,8 @@ export type ClientMsg =
 export type ServerMsg =
   | { type: "TaggedCodepoint"; clientId: number; codepoint: string }
   | { type: "TaggedBackspace"; clientId: number }
-  | { type: "TaggedClear"; clientId: number };
+  | { type: "TaggedClear"; clientId: number }
+  | { type: "Occupancy"; slots: boolean[] };
 
 type Field = (x: unknown) => boolean;
 
@@ -22,6 +23,8 @@ const str: Field = (x) => typeof x === "string";
 const int: Field = (x) => Number.isInteger(x);
 // a single codepoint may span two UTF-16 units, so count by codepoint.
 const char: Field = (x) => str(x) && [...x as string].length === 1;
+const bools: Field = (x) =>
+  Array.isArray(x) && x.every((b) => typeof b === "boolean");
 
 // each variant of a union is a `type` tag mapped to the checks its fields must
 // pass. a decoder validates the tag, then every field, and copies the verified
@@ -69,4 +72,5 @@ export const decodeServerMsg = decoder<ServerMsg>({
   TaggedCodepoint: { clientId: int, codepoint: char },
   TaggedBackspace: { clientId: int },
   TaggedClear: { clientId: int },
+  Occupancy: { slots: bools },
 });
