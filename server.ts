@@ -4,7 +4,6 @@ import {
   type ClientMsg,
   decodeClientInit,
   decodeClientMsg,
-  PALETTE_SIZE,
   type ServerInit,
   type ServerMsg,
   type SlotInfo,
@@ -19,21 +18,6 @@ const RATE_LIMIT = 256;
 const RATE_WINDOW_MS = 1000;
 
 type Subscriber = (msg: ServerMsg) => void;
-
-function tag(id: number, msg: ClientMsg): ServerMsg {
-  switch (msg.type) {
-    case "Codepoint":
-      return {
-        type: "TaggedCodepoint",
-        clientId: id,
-        codepoint: msg.codepoint,
-      };
-    case "Backspace":
-      return { type: "TaggedBackspace", clientId: id };
-    case "Clear":
-      return { type: "TaggedClear", clientId: id };
-  }
-}
 
 type Occupant = { sub: Subscriber } & SlotInfo;
 
@@ -94,13 +78,12 @@ function validateCapacity(capacity: number): string | null {
     : `Room capacity must be between 1 and ${MAX_CAPACITY} members`;
 }
 
-function validateIdentity(id: SlotInfo): string | null {
-  const length = [...id.nick].length;
+function validateNick(nick: string): string | null {
+  const length = [...nick].length;
   if (length === 0) return "Name can't be blank";
   if (length > MAX_NICK_LEN) {
     return `Name must be at most ${MAX_NICK_LEN} chars`;
   }
-  if (id.color < 0 || id.color >= PALETTE_SIZE) return "Invalid colour";
   return null;
 }
 
@@ -109,8 +92,8 @@ class Lobby {
 
   join(init: ClientInit, sub: Subscriber): JoinResult {
     const nick = init.nick.trim();
-    const badIdentity = validateIdentity({ nick, color: init.color });
-    if (badIdentity) return { ok: false, msg: badIdentity };
+    const invalidNick = validateNick(nick);
+    if (invalidNick) return { ok: false, msg: invalidNick };
 
     const name = init.name.trim();
     let room: Room;
@@ -150,7 +133,7 @@ class Membership {
   }
 
   feed(msg: ClientMsg): void {
-    this.room.broadcast(tag(this.clientId, msg), this.clientId);
+    this.room.broadcast({ ...msg, clientId: this.clientId }, this.clientId);
   }
 
   leave(): void {
@@ -158,16 +141,16 @@ class Membership {
   }
 }
 
-function rateLimiter(limit: number, windowMs: number): () => boolean {
+function rateLimiter(): () => boolean {
   let windowStart = 0;
   let count = 0;
   return () => {
     const now = Date.now();
-    if (now - windowStart >= windowMs) {
+    if (now - windowStart >= RATE_WINDOW_MS) {
       windowStart = now;
       count = 0;
     }
-    return count++ < limit;
+    return count++ < RATE_LIMIT;
   };
 }
 
@@ -212,7 +195,7 @@ function accept(
 
 function handleSocket(lobby: Lobby, socket: WebSocket) {
   let member: Membership | null = null;
-  const allow = rateLimiter(RATE_LIMIT, RATE_WINDOW_MS);
+  const allow = rateLimiter();
 
   socket.onmessage = (event) => {
     if (typeof event.data !== "string" || event.data.length > MAX_FRAME) {

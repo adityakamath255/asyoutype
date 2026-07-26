@@ -1,83 +1,96 @@
-export const PALETTE_SIZE = 14;
+import { isPaletteIndex } from "./palette.ts";
 
-export type SlotInfo = { nick: string; color: number };
+type Field<T = unknown> = (x: unknown) => x is T;
+type Fields = Record<string, Field>;
+type Schema = Record<string, Fields>;
 
-export type ClientInit =
-  | ({ type: "CreateRoom"; name: string; capacity: number } & SlotInfo)
-  | ({ type: "JoinRoom"; name: string } & SlotInfo);
+type InferFields<F extends Fields> = {
+  [K in keyof F]: F[K] extends Field<infer T> ? T : never;
+};
 
-export type ServerInit =
-  | { type: "ValidRoom"; clientId: number; capacity: number }
-  | { type: "InvalidRoom"; msg: string };
+type InferSchema<S extends Schema> = {
+  [T in keyof S]: { type: T } & InferFields<S[T]>;
+}[keyof S];
 
-export type ClientMsg =
-  | { type: "Codepoint"; codepoint: string }
-  | { type: "Backspace" }
-  | { type: "Clear" };
-
-export type ServerMsg =
-  | { type: "TaggedCodepoint"; clientId: number; codepoint: string }
-  | { type: "TaggedBackspace"; clientId: number }
-  | { type: "TaggedClear"; clientId: number }
-  | { type: "Occupancy"; slots: (SlotInfo | null)[] };
-
-type Field = (x: unknown) => boolean;
-
-const str: Field = (x) => typeof x === "string";
-const int: Field = (x) => Number.isInteger(x);
-// a single codepoint may span two UTF-16 units, so count by codepoint.
-const char: Field = (x) => str(x) && [...x as string].length === 1;
+const str = (x: unknown): x is string => typeof x === "string";
+const int = (x: unknown): x is number => Number.isInteger(x);
+export const isCodepoint = (x: unknown): x is string =>
+  str(x) && [...x].length === 1 && x >= " ";
 const isRecord = (x: unknown): x is Record<string, unknown> =>
   typeof x === "object" && x !== null && !Array.isArray(x);
-const slots: Field = (x) =>
-  Array.isArray(x) &&
-  x.every((e) => e === null || (isRecord(e) && str(e.nick) && int(e.color)));
 
-// each variant of a union is a `type` tag mapped to the checks its fields must
-// pass. a decoder validates the tag, then every field, and copies the verified
-// shape through; anything off-schema becomes null.
-type Schema = Record<string, Record<string, Field>>;
+function record<F extends Fields>(fields: F) {
+  return (x: unknown): x is InferFields<F> =>
+    isRecord(x) &&
+    Object.entries(fields).every(([key, check]) => check(x[key]));
+}
 
-function decoder<T>(schema: Schema): (data: string) => T | null {
+const slotFields = { nick: str, color: isPaletteIndex };
+export type SlotInfo = InferFields<typeof slotFields>;
+const slot = record(slotFields);
+
+const slots = (x: unknown): x is (SlotInfo | null)[] =>
+  Array.isArray(x) && x.every((value) => value === null || slot(value));
+
+function withClientId<S extends Schema>(schema: S) {
+  return Object.fromEntries(
+    Object.entries(schema).map(([type, fields]) => [
+      type,
+      { ...fields, clientId: int },
+    ]),
+  ) as { [T in keyof S]: S[T] & { clientId: typeof int } };
+}
+
+function decoder<S extends Schema>(
+  schema: S,
+): (data: string) => InferSchema<S> | null {
   return (data) => {
-    let v: Record<string, unknown>;
+    let value: Record<string, unknown>;
     try {
       const parsed = JSON.parse(data);
-      if (typeof parsed !== "object" || parsed === null) return null;
-      v = parsed;
+      if (!isRecord(parsed)) return null;
+      value = parsed;
     } catch {
       return null;
     }
-    const fields = typeof v.type === "string" ? schema[v.type] : undefined;
+    const fields = typeof value.type === "string"
+      ? schema[value.type]
+      : undefined;
     if (!fields) return null;
-    const out: Record<string, unknown> = { type: v.type };
+    const out: Record<string, unknown> = { type: value.type };
     for (const [key, check] of Object.entries(fields)) {
-      if (!check(v[key])) return null;
-      out[key] = v[key];
+      if (!check(value[key])) return null;
+      out[key] = value[key];
     }
-    return out as T;
+    return out as InferSchema<S>;
   };
 }
 
-export const decodeClientInit = decoder<ClientInit>({
-  CreateRoom: { name: str, capacity: int, nick: str, color: int },
-  JoinRoom: { name: str, nick: str, color: int },
-});
+const clientInitSchema = {
+  CreateRoom: { name: str, capacity: int, ...slotFields },
+  JoinRoom: { name: str, ...slotFields },
+};
+export type ClientInit = InferSchema<typeof clientInitSchema>;
+export const decodeClientInit = decoder(clientInitSchema);
 
-export const decodeClientMsg = decoder<ClientMsg>({
-  Codepoint: { codepoint: char },
+const clientMsgSchema = {
+  Codepoint: { codepoint: isCodepoint },
   Backspace: {},
   Clear: {},
-});
+};
+export type ClientMsg = InferSchema<typeof clientMsgSchema>;
+export const decodeClientMsg = decoder(clientMsgSchema);
 
-export const decodeServerInit = decoder<ServerInit>({
+const serverInitSchema = {
   ValidRoom: { clientId: int, capacity: int },
   InvalidRoom: { msg: str },
-});
+};
+export type ServerInit = InferSchema<typeof serverInitSchema>;
+export const decodeServerInit = decoder(serverInitSchema);
 
-export const decodeServerMsg = decoder<ServerMsg>({
-  TaggedCodepoint: { clientId: int, codepoint: char },
-  TaggedBackspace: { clientId: int },
-  TaggedClear: { clientId: int },
+const serverMsgSchema = {
+  ...withClientId(clientMsgSchema),
   Occupancy: { slots },
-});
+};
+export type ServerMsg = InferSchema<typeof serverMsgSchema>;
+export const decodeServerMsg = decoder(serverMsgSchema);

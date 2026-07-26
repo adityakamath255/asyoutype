@@ -24,7 +24,8 @@ join.
 
 The split follows the wire protocol.
 
-- **`protocol.ts`**: the messages.
+- **`protocol.ts`**: the messages and their runtime decoders.
+- **`palette.ts`**: the colour choices shared by validation and rendering.
 - **`server.ts`**: the rooms and the socket wiring. A `Room` is slot bookkeeping
   that fans messages out to its subscribers; the surrounding code wires
   WebSockets to rooms and serves the page. At startup it bundles the client into
@@ -66,11 +67,3 @@ its own box locally.
 `server.ts` as the entrypoint. It serves over HTTPS, so the client picks
 `wss://` automatically, and the runtime assigns the port (pass no port arg). The
 same `server.ts` runs unchanged anywhere Deno is installed.
-
-## Development
-
-```sh
-deno task check   # type-check
-deno task lint
-deno task fmt
-```

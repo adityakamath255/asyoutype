@@ -8,43 +8,19 @@ import {
   type ClientMsg,
   decodeServerInit,
   decodeServerMsg,
-  PALETTE_SIZE,
+  isCodepoint,
   type ServerInit,
   type ServerMsg,
   type SlotInfo,
 } from "../protocol.ts";
+import { isPaletteIndex, PALETTE } from "../palette.ts";
 
-const PALETTE = [
-  "245,224,220",
-  "242,205,205",
-  "245,194,231",
-  "203,166,247",
-  "243,139,168",
-  "235,160,172",
-  "250,179,135",
-  "249,226,175",
-  "166,227,161",
-  "148,226,213",
-  "137,220,235",
-  "116,199,236",
-  "137,180,250",
-  "180,190,254",
-];
-if (PALETTE.length !== PALETTE_SIZE) throw new Error("palette size mismatch");
-
-// the box clips overflow visually; this just caps what it holds in memory
-const MAX_CHARS = 256;
-
+const MAX_BUFFERED_CODEPOINTS = 256;
 const HELP = matchMedia("(pointer: coarse)").matches
   ? "tap to type"
   : "type to stream";
 
-// virtual keyboards only report backspace by deleting something, so the
-// capture input always holds one zero-width char for them to delete.
-const SENTINEL = "​";
-
 type Tag = keyof HTMLElementTagNameMap;
-
 type Props<K extends Tag> = Partial<Omit<HTMLElementTagNameMap[K], "style">>;
 
 function el<K extends Tag>(
@@ -57,15 +33,21 @@ function el<K extends Tag>(
   return node;
 }
 
+function query<T extends Element>(selector: string): T {
+  const node = document.querySelector<T>(selector);
+  if (!node) throw new Error(`Missing ${selector}`);
+  return node;
+}
+
 class Box {
   readonly el: HTMLElement;
   private line: HTMLElement;
   private tag: HTMLElement;
   private codepoints: string[] = [];
 
-  constructor(private index: number, private isMe: boolean) {
+  constructor() {
     this.line = el("div", { className: "line" });
-    this.tag = el("span", { className: "tag", textContent: `${index + 1}` });
+    this.tag = el("span", { className: "tag" });
     this.el = el("div", { className: "box" }, this.tag, this.line);
   }
 
@@ -75,7 +57,9 @@ class Box {
 
   push(codepoint: string): void {
     this.codepoints.push(codepoint);
-    if (this.codepoints.length > MAX_CHARS) this.codepoints.shift();
+    if (this.codepoints.length > MAX_BUFFERED_CODEPOINTS) {
+      this.codepoints.shift();
+    }
     this.render();
   }
 
@@ -85,23 +69,20 @@ class Box {
   }
 
   clear(): void {
-    this.codepoints.length = 0;
+    this.codepoints = [];
     this.render();
   }
 
-  setSlot(info: SlotInfo | null): void {
-    if (!info) this.clear();
+  setSlot(info: SlotInfo | null, isMe: boolean): void {
     this.el.classList.toggle("occupied", info !== null);
-    this.tag.hidden = info === null;
     if (info) {
-      this.tag.textContent = this.isMe ? `${info.nick} [you]` : info.nick;
-      this.el.style.setProperty("--slot", `rgb(${PALETTE[info.color]})`);
+      this.tag.textContent = isMe ? `${info.nick} [you]` : info.nick;
+      this.el.style.setProperty("--slot", PALETTE[info.color]);
+    } else {
+      this.clear();
     }
   }
 }
-
-const isCodepoint = (s: string): boolean =>
-  [...s].length === 1 && s >= " " && s !== SENTINEL;
 
 class Session {
   private ended = new AbortController();
@@ -143,16 +124,16 @@ class Capture {
     this.el = el("input", {
       className: "capture",
       type: "text",
-      value: SENTINEL,
       autocomplete: "off",
       autocapitalize: "off",
       autocorrect: false,
       spellcheck: false,
-      ariaLabel: HELP,
+      ariaLabel: "text stream input",
     });
 
+    const sentinel = "\u200b";
     const reset = () => {
-      this.el.value = SENTINEL;
+      this.el.value = sentinel;
     };
     const type = (text: string) => {
       for (const codepoint of text) {
@@ -161,14 +142,16 @@ class Capture {
     };
     const flush = () => {
       const { value } = this.el;
-      if (value.startsWith(SENTINEL)) {
-        type(value.slice(SENTINEL.length));
+      if (value.startsWith(sentinel)) {
+        type(value.slice(sentinel.length));
       } else {
         sink({ type: "Backspace" });
         type(value);
       }
       reset();
     };
+
+    reset();
 
     this.el.addEventListener(
       "input",
@@ -196,7 +179,7 @@ class Capture {
   }
 }
 
-function applyClient(box: Box, msg: ClientMsg): void {
+function applyEdit(box: Box, msg: ClientMsg): void {
   switch (msg.type) {
     case "Codepoint":
       box.push(msg.codepoint);
@@ -215,33 +198,36 @@ class RoomView {
   private boxes: Box[];
   private capture: Capture;
 
-  constructor(session: Session, readonly name: string) {
+  constructor(private readonly session: Session, readonly name: string) {
     this.boxes = Array.from(
       { length: session.capacity },
-      (_, i) => new Box(i, i === session.clientId),
+      () => new Box(),
     );
     const ownBox = this.boxes[session.clientId];
     const sink = (msg: ClientMsg) => {
       session.send(msg);
-      applyClient(ownBox, msg);
+      applyEdit(ownBox, msg);
     };
-    this.capture = new Capture(sink, session.signal);
-
-    const clearButton = el("button", {
+    const { signal } = session;
+    this.capture = new Capture(sink, signal);
+    const clear = el("button", {
       className: "clear",
+      type: "button",
       textContent: "clear",
-      onclick: () => sink({ type: "Clear" }),
     });
-
+    clear.addEventListener(
+      "click",
+      () => sink({ type: "Clear" }),
+      { signal },
+    );
     this.el = el(
       "div",
       { className: "room-body" },
       el("div", { className: "room-name", textContent: name }),
       ...this.boxes.map((box) => box.el),
-      el("div", { className: "help", textContent: HELP }, clearButton),
+      el("div", { className: "help" }, HELP, clear),
       this.capture.el,
     );
-    const { signal } = session;
     globalThis.addEventListener("click", () => this.focus(), { signal });
     globalThis.addEventListener("focus", () => this.focus(), { signal });
   }
@@ -251,20 +237,17 @@ class RoomView {
   }
 
   apply(msg: ServerMsg): void {
-    switch (msg.type) {
-      case "TaggedCodepoint":
-        this.boxes[msg.clientId].push(msg.codepoint);
-        break;
-      case "TaggedBackspace":
-        this.boxes[msg.clientId].pop();
-        break;
-      case "TaggedClear":
-        this.boxes[msg.clientId].clear();
-        break;
-      case "Occupancy":
-        this.boxes.forEach((box, i) => box.setSlot(msg.slots[i]));
-        break;
+    if (msg.type !== "Occupancy") {
+      applyEdit(this.boxes[msg.clientId], msg);
+      return;
     }
+
+    const { slots } = msg;
+    this.boxes.forEach(
+      (box, i) => box.setSlot(slots[i], i === this.session.clientId),
+    );
+    const n = slots.filter(Boolean).length;
+    document.title = `${this.name} [${n}/${this.session.capacity}]`;
   }
 }
 
@@ -273,9 +256,10 @@ type Connection =
   | { ok: false; error: string };
 
 class App {
-  private readonly form = document.getElementById("join") as HTMLFormElement;
-  private readonly errorEl = document.getElementById("error") as HTMLElement;
-  private readonly room = document.getElementById("room") as HTMLElement;
+  private readonly form = query<HTMLFormElement>("#join");
+  private readonly errorEl = query<HTMLElement>("#error");
+  private readonly colors = query<HTMLElement>("#colors");
+  private readonly room = query<HTMLElement>("#room");
   private readonly baseTitle = document.title;
 
   private readonly nameField = this.field("name") as HTMLInputElement;
@@ -284,7 +268,9 @@ class App {
   private readonly modeField = this.field("mode") as RadioNodeList;
 
   private field(name: string) {
-    return this.form.elements.namedItem(name);
+    const field = this.form.elements.namedItem(name);
+    if (!field) throw new Error(`Missing form field ${name}`);
+    return field;
   }
 
   start(): void {
@@ -306,30 +292,34 @@ class App {
   }
 
   private buildColors(selected: number): void {
-    const container = document.getElementById("colors") as HTMLElement;
-    container.append(...PALETTE.map((rgb, i) => {
+    this.colors.replaceChildren(...PALETTE.map((color, i) => {
+      const input = el("input", {
+        type: "radio",
+        name: "color",
+        value: String(i),
+        checked: i === selected,
+      });
       const dot = el("span", { className: "dot" });
-      dot.style.background = `rgb(${rgb})`;
+      dot.style.background = color;
       return el(
         "label",
         { className: "swatch" },
-        el("input", {
-          type: "radio",
-          name: "color",
-          value: String(i),
-          checked: i === selected,
-        }),
+        input,
         dot,
       );
     }));
   }
 
   private readForm(): ClientInit {
-    const name = this.nameField.value.trim();
+    const color = Number(
+      (this.field("color") as RadioNodeList).value,
+    );
+    if (!isPaletteIndex(color)) throw new Error("Invalid colour selection");
     const info: SlotInfo = {
       nick: this.nickField.value.trim(),
-      color: Number((this.field("color") as RadioNodeList).value),
+      color,
     };
+    const name = this.nameField.value.trim();
     return this.modeField.value === "create"
       ? {
         type: "CreateRoom",
@@ -350,13 +340,7 @@ class App {
     const { session } = result;
     const view = new RoomView(session, init.name);
     this.show(view);
-    session.onMessage((msg) => {
-      view.apply(msg);
-      if (msg.type === "Occupancy") {
-        const n = msg.slots.filter(Boolean).length;
-        document.title = `${view.name} [${n}/${session.capacity}]`;
-      }
-    });
+    session.onMessage((msg) => view.apply(msg));
     session.signal.addEventListener("abort", () => this.show(null), {
       once: true,
     });
@@ -368,8 +352,6 @@ class App {
     if (!view) document.title = this.baseTitle;
     history.replaceState(null, "", location.pathname + location.search + hash);
     this.room.replaceChildren(...(view ? [view.el] : []));
-    this.form.hidden = view !== null;
-    this.room.hidden = view === null;
   }
 }
 
@@ -383,7 +365,9 @@ async function connect(init: ClientInit): Promise<Connection> {
   );
 
   const reply = await handshake(socket);
-  if (reply === null) return { ok: false, error: "connection closed" };
+  if (reply === null) {
+    return { ok: false, error: "connection closed" };
+  }
   if (reply.type === "InvalidRoom") {
     socket.close();
     return { ok: false, error: reply.msg };
@@ -420,7 +404,7 @@ function loadIdentity(): SlotInfo | null {
     const v = JSON.parse(localStorage.getItem(IDENTITY_KEY) ?? "null");
     if (
       typeof v?.nick === "string" &&
-      Number.isInteger(v?.color) && v.color >= 0 && v.color < PALETTE_SIZE
+      isPaletteIndex(v?.color)
     ) {
       return { nick: v.nick, color: v.color };
     }

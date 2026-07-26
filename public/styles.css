@@ -24,6 +24,10 @@ body {
 main {
   width: min(48ch, 100%);
 }
+main:has(#room:not(:empty)) #join,
+#room:empty {
+  display: none;
+}
 h1 {
   margin: 0 0 1rem;
   font-size: 1.25rem;
@@ -141,6 +145,9 @@ button:hover {
   border-color: var(--slot);
   color: var(--slot);
 }
+.box:not(.occupied) .tag {
+  display: none;
+}
 .tag {
   position: absolute;
   top: 0;
@@ -174,7 +181,6 @@ button:hover {
   color: var(--subtext);
   font-size: 0.85rem;
 }
-
 .capture {
   position: fixed;
   top: 0;
@@ -208,8 +214,4 @@ button:hover {
   .help {
     position: static;
   }
-}
-
-[hidden] {
-  display: none !important;
 }
