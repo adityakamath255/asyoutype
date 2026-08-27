@@ -1,69 +1,74 @@
 # asyoutype
 
-A small web app for sharing a line of text live. Everyone in a room gets a box;
-as you type, your characters stream into your box on everyone's screen, one
-codepoint at a time. Backspace retracts the last one; escape clears your line.
+A small web app for sharing a line of text as it is typed. Each person in a room gets a box, and edits to that box appear on every member's screen over a WebSocket.
 
-## Running
+Rooms hold between one and eight people and disappear when the last person leaves. The server runs on Deno, and the browser client uses TypeScript and the DOM without a frontend framework.
 
-Needs [Deno](https://deno.com/). The one dependency,
-[`@deno/emit`](https://jsr.io/@deno/emit), transpiles the browser client at
-startup, so there's no build step.
+## Running locally
+
+Install [Deno](https://deno.com/), then run:
 
 ```sh
-deno task start          # http://localhost:8000
-deno task start 4000     # or pick a port
+deno task start
 ```
 
-Open the URL, choose create or join, enter a room name (up to 40 chars), pick
-your own name and colour and, for create, a capacity (1-8). Type to stream,
-backspace to retract, escape to clear. Open the URL in another tab or machine to
-join.
+The app will be available at <http://localhost:8000>. To choose another port, pass it after the task name:
 
-## Layout
+```sh
+deno task start 4000
+```
 
-The split follows the wire protocol.
+The server uses [`@deno/emit`](https://jsr.io/@deno/emit) to bundle the browser client in memory during startup. There is no separate build step or generated JavaScript in the repository.
 
-- **`protocol.ts`**: the messages and their runtime decoders.
-- **`palette.ts`**: the colour choices shared by validation and rendering.
-- **`server.ts`**: the rooms and the socket wiring. A `Room` is slot bookkeeping
-  that fans messages out to its subscribers; the surrounding code wires
-  WebSockets to rooms and serves the page. At startup it bundles the client into
-  one JS file with the wire types inlined, so the browser never receives
-  TypeScript.
-- **`public/`**: the client. `main.ts` renders and reports keystrokes,
-  `index.html` is the markup, `styles.css` the look. It imports the wire types
-  from `protocol.ts` so both ends agree on the messages.
+## Using it
 
-### The wire
+Create a room with a name, capacity, nickname, and colour. After entering, copy the URL to share the room name with someone else. Nickname and colour are saved in local storage for the next visit.
 
-JSON, one message per frame. Two phases:
+Typing appends Unicode codepoints to your box. Backspace removes the last codepoint, and Escape or the clear button empties the box. Each client keeps the most recent 256 codepoints for every box.
 
-1. **Handshake.** The client sends one `ClientInit` (create or join). The server
-   replies `ValidRoom` (with the assigned id and capacity) or `InvalidRoom`
-   (with a reason, then closes).
-2. **Streaming.** The client sends `ClientMsg` (a codepoint, a backspace, or a
-   clear) and renders it into its own box at once, no round-trip; the server
-   relays it to the _other_ members as a `ServerMsg` stamped with the sender's
-   `clientId` so they know which box to update. Whenever membership changes the
-   server also broadcasts `Occupancy`, the full per-slot map: `null` for an
-   empty slot, otherwise the occupant's `{ nick, color }`. Clients dim empty
-   boxes and derive each box's label and colour from the latest snapshot.
+## Implementation
 
-### Rooms and identity
+Each edit follows two paths:
 
-A room is a fixed set of slots, sized at creation. Joining takes the lowest free
-slot; that index is your client id and your box. Leaving frees the slot for the
-next joiner.
+```text
+                    +--> local box
+input -> ClientMsg -+
+                    +--> WebSocket -> Room -> other clients
+```
 
-Membership tracks the WebSocket: when a connection closes for any reason the
-slot frees, and the room is dropped if it just emptied. `Occupancy` snapshots go
-to every subscriber; a member's keystrokes go to everyone else, since it renders
-its own box locally.
+The client applies its own edit immediately, then sends the same message to the server. The room adds the sender's client ID and relays the edit to every other member. Local echo keeps typing independent of network round-trip time.
 
-## Deploying it
+A room owns a fixed array of slots. A new member receives the lowest free slot, and that index identifies both the member and their box. Whenever someone enters or leaves, the room broadcasts the complete occupancy map. Closing a socket frees its slot; empty rooms are removed from the lobby.
 
-[Deno Deploy](https://deno.com/deploy): point a project at this directory with
-`server.ts` as the entrypoint. It serves over HTTPS, so the client picks
-`wss://` automatically, and the runtime assigns the port (pass no port arg). The
-same `server.ts` runs unchanged anywhere Deno is installed.
+The wire protocol uses one JSON object per WebSocket frame and has two phases. The first client message creates or joins a room, and the server either rejects it or returns the assigned client ID and room capacity. Later messages contain a codepoint, backspace, or clear operation.
+
+[`protocol.ts`](protocol.ts) defines each message as a runtime schema. TypeScript types are inferred from those schemas, and both the server and browser use the resulting decoders. This keeps the accepted wire format and the static message types in one place. [`palette.ts`](palette.ts) exports the shared colours and a type guard for valid palette indices.
+
+The browser captures text through a hidden input. A sentinel distinguishes backspace from inserted text, while composition events delay input from an IME until the composition is complete. Iterating over the resulting string sends one Unicode codepoint per message.
+
+At startup, [`server.ts`](server.ts) reads the HTML and CSS, bundles [`public/main.ts`](public/main.ts), and serves all three from memory. The same process owns the lobby and handles WebSocket connections.
+
+## Checks
+
+Type-check the server, browser client, and their transitive imports with:
+
+```sh
+deno check server.ts public/main.ts
+```
+
+The repository does not currently include an automated test suite.
+
+## Deployment
+
+Use `server.ts` as the entry point on a Deno host. The deployment must include the `public` directory and allow network, file, and environment access. When the page is served over HTTPS, the browser selects `wss://` for the WebSocket connection.
+
+## Limitations
+
+- Rooms and membership live in one server process. Restarting it removes every room, and multiple instances do not share a lobby.
+- The server stores occupancy but not the text in each box. A late joiner starts with empty boxes, and a reconnecting client cannot recover earlier text.
+- There is no authentication. Anyone who knows a room name can join while a slot is free.
+- The server relays up to 256 frames per socket in each one-second window. Later frames are dropped rather than queued, so the sender and other clients can diverge.
+
+## License
+
+[MIT](LICENSE)
